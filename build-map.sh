@@ -88,9 +88,9 @@ for raw in vals:
 PY
 
 echo "Scanning ScriptersWar asset candidates..."
-BEST_URL=""
-BEST_SIZE=0
+rm -f /tmp/swscan/selected-url.txt /tmp/swscan/selected.png
 COUNT=0
+
 while IFS= read -r cand; do
   [ -n "$cand" ] || continue
   COUNT=$((COUNT+1))
@@ -109,37 +109,43 @@ while IFS= read -r cand; do
   clen="$(printf '%s\n' "$headers" | tr -d '\r' | awk -F': ' 'tolower($1)=="content-length"{v=$2} END{print v}')"
   case "$clen" in ''|*[!0-9]*) clen=0;; esac
 
-  if printf '%s' "$ctype" | grep -qi '^image/' || printf '%s' "$url" | grep -qiE '\.(png|webp|jpg|jpeg)([?&]|$)'; then
-    if [ "$clen" -gt "$BEST_SIZE" ]; then
-      BEST_SIZE="$clen"; BEST_URL="$url"
-    fi
+  [ "$clen" -ge 15000000 ] || continue
+  if ! printf '%s' "$ctype" | grep -qi '^image/' && ! printf '%s' "$url" | grep -qiE '\.(png|webp|jpg|jpeg)([?&]|$)'; then
+    continue
+  fi
+
+  echo "Checking large image candidate: $clen bytes"
+  rm -f /tmp/swscan/probe.img
+  curl -fLsS --retry 1 --connect-timeout 12 --max-time 300 \
+    -A "Mozilla/5.0" -e "$SW_PAGE" "$url" -o /tmp/swscan/probe.img || true
+  [ -s /tmp/swscan/probe.img ] || continue
+
+  dims="$(file /tmp/swscan/probe.img | sed -nE 's/.* ([0-9]+) x ([0-9]+).*/\1 \2/p' | head -n1)"
+  [ -n "$dims" ] || continue
+  w="$(printf '%s' "$dims" | awk '{print $1}')"
+  h="$(printf '%s' "$dims" | awk '{print $2}')"
+  echo "Candidate dimensions: ${w}x${h}"
+
+  good="$(awk -v w="$w" -v h="$h" 'BEGIN{
+    r=w/h; target=72622/48128;
+    exact=( (w>=18000 && w<=18350 && h>=11900 && h<=12150) ||
+            (w>=36000 && w<=36650 && h>=23900 && h<=24200) ||
+            (w>=72000 && w<=73250 && h>=47900 && h<=48400) );
+    close=(w>=17000 && (r-target<0.015 && target-r<0.015));
+    print (exact || close) ? 1 : 0;
+  }')"
+
+  if [ "$good" = "1" ]; then
+    mv /tmp/swscan/probe.img /tmp/swscan/selected.png
+    printf '%s' "$url" > /tmp/swscan/selected-url.txt
+    echo "Compatible Hallownest world map found."
+    break
   fi
 done < /tmp/swscan/candidates.txt
 
-if [ -n "$BEST_URL" ]; then
-  echo "Best ScriptersWar image candidate: $BEST_SIZE bytes"
-  curl -fLsS --retry 2 --connect-timeout 15 --max-time 900 \
-    -A "Mozilla/5.0" -e "$SW_PAGE" "$BEST_URL" -o /tmp/hallownest-hd.png || true
+if [ -s /tmp/swscan/selected.png ]; then
+  mv /tmp/swscan/selected.png /tmp/hallownest-hd.png
 fi
-
-# If HEAD did not expose a useful Content-Length, try likely map-image candidates directly,
-# but abort each download after a reasonable timeout and validate the result below.
-if [ ! -s /tmp/hallownest-hd.png ]; then
-  while IFS= read -r cand; do
-    case "$(printf '%s' "$cand" | tr '[:upper:]' '[:lower:]')" in
-      *hollow*.png*|*map*.png*|*b-cdn*.png*|*bunny*.png*)
-        echo "Trying likely HD candidate..."
-        curl -fLsS --retry 1 --connect-timeout 10 --max-time 300 \
-          -A "Mozilla/5.0" -e "$SW_PAGE" "$cand" -o /tmp/hallownest-hd.png || true
-        if [ -s /tmp/hallownest-hd.png ] && file /tmp/hallownest-hd.png | grep -qiE 'PNG|image'; then
-          break
-        fi
-        rm -f /tmp/hallownest-hd.png
-        ;;
-    esac
-  done < /tmp/swscan/candidates.txt
-fi
-
 # Validate that the downloaded HD candidate is actually an image.
 if [ -s /tmp/hallownest-hd.png ]; then
   if ! file /tmp/hallownest-hd.png | grep -qiE 'PNG|image'; then
