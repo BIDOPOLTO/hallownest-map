@@ -137,7 +137,8 @@ function renderTiles(){
         img.alt='';
         img.draggable=false;
         img.decoding='async';
-        img.src=m.url(z,tx,ty);
+        const sourceZ=(m.maxNative+1)-z;
+        img.src=m.url(sourceZ,tx,ty);
         img.onerror=()=>{ if(generation===tileGeneration) img.remove(); };
         els.tileLayer.appendChild(img);
       }
@@ -197,7 +198,8 @@ function renderMarkers(){
 function updateStatus(shown=els.markerLayer.children.length){
   const m=currentMap(),ratio=Math.max(.01,scale/fitScale);
   const zl=ratio>=10?ratio.toFixed(0):ratio.toFixed(1);
-  els.statusChip.textContent=`${m.label} · tile L${nativeZoom()}/${m.maxNative} · zoom ×${zl} · ${shown.toLocaleString('it-IT')} marker`;
+  const dz=nativeZoom(),sourceZ=(m.maxNative+1)-dz;
+  els.statusChip.textContent=`${m.label} · tile Z${sourceZ} · zoom ×${zl} · ${shown.toLocaleString('it-IT')} marker`;
 }
 function renderProgress(){
   const found=Object.values(state.found).filter(Boolean).length;
