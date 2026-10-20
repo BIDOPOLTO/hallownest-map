@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
   <meta name="theme-color" content="#10151d">
   <title>Hallownest Map – Federico</title>
-  <link rel="stylesheet" href="styles.css">\n  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
 </head>
 <body>
   <div id="app">
@@ -43,6 +44,7 @@
           <img id="screenshotMap" class="base-map" src="maps/hallownest-screenshot.png" alt="">
           <img id="sketchMap" class="base-map" src="maps/hallownest-sketch.webp" alt="">
         </div>
+        <div id="screenshotHdTiles" aria-hidden="true"></div>
         <div id="markerLayer"></div>
       </div>
 
@@ -91,5 +93,6 @@
 
   <script src="markers.js"></script>
   <script src="app.js"></script>
-  <script>if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));}</script>\n</body>
+  <script>if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));}</script>
+</body>
 </html>
