@@ -123,6 +123,17 @@ rm -f /tmp/screenshot-ref.img /tmp/sketch-ref.img
 discover_sw_asset screenshot /tmp/screenshot-ref.img || true
 discover_sw_asset sketch /tmp/sketch-ref.img || true
 
+echo "Overlay metadata clues:"
+python3 - <<'PY' || true
+import glob,re
+txt='\n'.join(open(f,encoding='utf-8',errors='ignore').read() for f in glob.glob('/tmp/sw-sketch/js_*.txt'))
+for token in ('hk_v5','hk_sketch_v3','Screenshots Image','Sketch Image','getDimExcludingBlack','digitalZoom','getMaxZoom','createLeafMap'):
+    print('---',token,'---')
+    for m in list(re.finditer(re.escape(token),txt,re.I))[:4]:
+        a=max(0,m.start()-1400); b=min(len(txt),m.end()+2200)
+        print(re.sub(r'\s+',' ',txt[a:b])[:3600])
+PY
+
 echo "Sketch JS clues:"
 python3 - <<'PY' || true
 import glob,re
