@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 mkdir -p maps
-printf 'window.HK_SKETCH_POS={};\n' > maps/sketch-positions.js
-
 UA="Mozilla/5.0"
 PAGE="https://scripterswar.com/hollowknight/map?image=sketch"
 WORK="/tmp/hk-sw"
@@ -28,10 +26,7 @@ PY
 i=0
 while IFS= read -r js; do
   [ -n "$js" ] || continue
-  case "$js" in
-    http://*|https://*) ;;
-    *) continue ;;
-  esac
+  case "$js" in http://*|https://*) ;; *) continue ;; esac
   if printf '%s' "$js" | grep -q '[{}<>[:space:]]'; then continue; fi
   i=$((i+1))
   [ "$i" -le 40 ] || break
@@ -43,7 +38,7 @@ import sys,re,glob,json
 work=sys.argv[1]
 txt='\n'.join(open(f,encoding='utf-8',errors='ignore').read() for f in glob.glob(work+'/js_*.txt'))
 
-# Extract screenshot -> sketch marker coordinate substitutions used by ScriptersWar.
+# Screenshot -> Sketch marker coordinates.
 pat=re.compile(
     r'"pos":\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]'
     r'(?:(?!"pos":).){0,2400}?'
@@ -55,38 +50,69 @@ pat=re.compile(
 out={}
 for m in pat.finditer(txt):
     x,y,uid,x2,y2=m.groups()
-    key=f'{float(x):.2f},{float(y):.2f}'
-    out[key]=[float(x2),float(y2)]
-
+    out[f'{float(x):.2f},{float(y):.2f}']=[float(x2),float(y2)]
 open('maps/sketch-positions.js','w',encoding='utf-8').write(
     'window.HK_SKETCH_POS='+json.dumps(out,separators=(',',':'))+';\n'
 )
 print('Sketch marker positions:',len(out))
 
-# Verify the exact progressive map sources we mirror in-browser.
-for token in ('https://scripterswarmap.b-cdn.net/hk_v5/{z}_{x}_{y}.webp?v=1',
-              'https://scripterswarmap.b-cdn.net/hk_sketch_v3/{z}_{x}_{y}.webp?v=1'):
-    if token not in txt:
-        raise SystemExit('Expected tile source missing: '+token)
+# Extract ScriptersWar's sparse tile allow-lists.
+m=re.search(r'validImageSet\s*:\s*\[\s*"([^"]*)"\s*,\s*"([^"]*)"',txt,re.S)
+if not m:
+    m=re.search(r'"validImageSet"\s*:\s*\[\s*"([^"]*)"\s*,\s*"([^"]*)"',txt,re.S)
+if not m:
+    raise SystemExit('ERROR: could not extract ScriptersWar validImageSet arrays')
 
-print('ScriptersWar progressive tile sources verified.')
+sets=[]
+for raw in m.groups():
+    vals=[v for v in raw.split(',') if re.fullmatch(r'\d+_\d+_\d+',v)]
+    sets.append(vals)
+if not sets[0] or not sets[1]:
+    raise SystemExit('ERROR: extracted empty tile lists')
+
+open(work+'/screenshot-tiles.txt','w').write('\n'.join(sets[0])+'\n')
+open(work+'/sketch-tiles.txt','w').write('\n'.join(sets[1])+'\n')
+print('Screenshot tile files:',len(sets[0]))
+print('Sketch tile files:',len(sets[1]))
 PY
 
-python3 - "$WORK" <<'PY' || true
-import glob,re
-txt='\n'.join(open(f,encoding='utf-8',errors='ignore').read() for f in glob.glob('/tmp/hk-sw/js_*.txt'))
-for token in ('getTileUrl','validImageSet.has','replace("{z}"','tileSize','getCropSize'):
-    print('=== TILE DIAG',token,'===')
-    m=re.search(re.escape(token),txt,re.I)
-    if m:
-        print(re.sub(r'\s+',' ',txt[max(0,m.start()-1800):m.start()+3200])[:5000])
-PY
+download_tiles () {
+  list="$1"
+  folder="$2"
+  base="$3"
+  mkdir -p "$folder"
+  export UA PAGE folder base
+  xargs -r -P 16 -n 1 sh -c '
+    key="$1"
+    out="$folder/$key.webp"
+    [ -s "$out" ] && exit 0
+    tmp="$out.tmp"
+    if curl -fLsS --retry 2 --connect-timeout 10 --max-time 90 -A "$UA" -e "$PAGE" "$base/$key.webp?v=1" -o "$tmp"; then
+      mv "$tmp" "$out"
+    else
+      rm -f "$tmp"
+      echo "FAILED TILE $base/$key.webp" >&2
+      exit 12
+    fi
+  ' sh < "$list"
+}
 
-echo "Probing progressive map tiles..."
-for u in   "https://scripterswarmap.b-cdn.net/hk_v5/7_0_0.webp?v=1"   "https://scripterswarmap.b-cdn.net/hk_v5/6_0_0.webp?v=1"   "https://scripterswarmap.b-cdn.net/hk_sketch_v3/3_0_0.webp?v=1"   "https://scripterswarmap.b-cdn.net/hk_sketch_v3/2_0_0.webp?v=1"
-do
-  code="$(curl -LsS -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 30 -A "$UA" -e "$PAGE" "$u" || true)"
-  echo "Tile probe $code $u"
-done
+echo "Caching Screenshot tiles on our own Render site..."
+rm -rf maps/hk_v5
+download_tiles "$WORK/screenshot-tiles.txt" "maps/hk_v5" "https://scripterswarmap.b-cdn.net/hk_v5"
 
-echo "Map metadata build completed."
+echo "Caching Sketch tiles on our own Render site..."
+rm -rf maps/hk_sketch_v3
+download_tiles "$WORK/sketch-tiles.txt" "maps/hk_sketch_v3" "https://scripterswarmap.b-cdn.net/hk_sketch_v3"
+
+shot_expected="$(wc -l < "$WORK/screenshot-tiles.txt" | tr -d ' ')"
+shot_got="$(find maps/hk_v5 -type f -name '*.webp' | wc -l | tr -d ' ')"
+sk_expected="$(wc -l < "$WORK/sketch-tiles.txt" | tr -d ' ')"
+sk_got="$(find maps/hk_sketch_v3 -type f -name '*.webp' | wc -l | tr -d ' ')"
+
+echo "Screenshot cached: $shot_got / $shot_expected"
+echo "Sketch cached: $sk_got / $sk_expected"
+[ "$shot_got" = "$shot_expected" ] || { echo "ERROR: incomplete Screenshot tile cache"; exit 1; }
+[ "$sk_got" = "$sk_expected" ] || { echo "ERROR: incomplete Sketch tile cache"; exit 1; }
+
+echo "Local progressive maps ready."
