@@ -1,17 +1,31 @@
 (() => {
 'use strict';
 
-const hd=window.HK_HD_MAP||{available:false};
-const ultra=window.HK_ULTRA_MAP||{available:false};
-const WORLD_W = hd.worldWidth || 1152;
-const WORLD_H = hd.worldHeight || 960;
-const MIN_ABS_SCALE = 0.20;
-const MAX_ZOOM_RATIO = 128;
-const ZOOM_BUTTON_FACTOR = 2;
-const WHEEL_SPEED = 0.0042;
-const TILE_SIZE = 1024;
+const MAPS={
+  screenshot:{
+    label:'Screenshot',
+    url:(z,x,y)=>`https://scripterswarmap.b-cdn.net/hk_v5/${z}_${x}_${y}.webp?v=1`,
+    dimW:131072,dimH:65536,contentW:72622,contentH:61440,
+    crop:1024,maxNative:6,digitalZoom:1
+  },
+  sketch:{
+    label:'Sketch',
+    url:(z,x,y)=>`https://scripterswarmap.b-cdn.net/hk_sketch_v3/${z}_${x}_${y}.webp?v=1`,
+    dimW:8192,dimH:8192,contentW:5120,contentH:5120,
+    crop:1024,maxNative:2,digitalZoom:1
+  }
+};
+for(const m of Object.values(MAPS)){
+  m.worldW=m.contentW/Math.pow(2,m.maxNative);
+  m.worldH=m.contentH/Math.pow(2,m.maxNative);
+  m.fullWorldW=m.dimW/Math.pow(2,m.maxNative);
+  m.fullWorldH=m.dimH/Math.pow(2,m.maxNative);
+  m.maxScale=Math.pow(2,m.maxNative+m.digitalZoom);
+}
 
 const markers=(window.HK_MARKERS||[]).map((m,i)=>({...m,id:i}));
+const sketchPos=window.HK_SKETCH_POS||{};
+
 const GROUPS=[
   {name:'Panchine & Trasporti',cats:['bench','stagStation','tram']},
   {name:'Mappa & Scorciatoie',cats:['map','mapMisc','shortcut']},
@@ -24,7 +38,6 @@ const GROUPS=[
   {name:"Diario del Cacciatore",cats:['huntersJournal']},
   {name:'Altro',cats:['permFlags']}
 ];
-
 const LABELS={
   bench:'Panchine',stagStation:'Stazioni Cervo',tram:'Tram',
   map:'Mappe',mapMisc:'Mappa / Info',shortcut:'Scorciatoie',
@@ -34,7 +47,6 @@ const LABELS={
   grub:'Larve',item:'Oggetti / Chiavi',npc:'NPC',quest:'Quest',
   geo:'Geo',huntersJournal:'Diario del Cacciatore',permFlags:'Info / Eventi'
 };
-
 const COLORS={
   bench:'#77e58e',stagStation:'#d9a56b',tram:'#c88f55',
   map:'#65c9ff',mapMisc:'#7ca4c7',shortcut:'#8e9cad',
@@ -46,12 +58,11 @@ const COLORS={
 };
 
 const ids=[
- 'mapViewport','baseLayer','screenshotMap','sketchMap','screenshotHdTiles','markerLayer',
- 'searchInput','categoryGroups','allBtn','noneBtn','hideFound','fitBtn','zoomIn','zoomOut',
- 'openSidebar','sidebar','closeSidebar','progressBtn','progressPanel','closeProgress',
- 'progressSummary','progressBar','progressGroups','markerCard','markerCategory','markerTitle',
- 'markerDetails','markerFound','markerNotes','closeMarker','spoilerBtn','statusChip',
- 'exportBtn','importInput','mapModeScreenshot','mapModeSketch'
+ 'mapViewport','tileLayer','markerLayer','searchInput','categoryGroups','allBtn','noneBtn',
+ 'hideFound','fitBtn','zoomIn','zoomOut','openSidebar','sidebar','closeSidebar','progressBtn',
+ 'progressPanel','closeProgress','progressSummary','progressBar','progressGroups','markerCard',
+ 'markerCategory','markerTitle','markerDetails','markerFound','markerNotes','closeMarker',
+ 'spoilerBtn','statusChip','exportBtn','importInput','mapModeScreenshot','mapModeSketch'
 ];
 const els=Object.fromEntries(ids.map(id=>[id,document.getElementById(id)]));
 
@@ -59,15 +70,10 @@ let state=loadState();
 let activeCats=new Set(Object.keys(LABELS));
 let selectedId=null;
 let mapMode=localStorage.getItem('hallownest-map-base')||'screenshot';
-let scale=1;
-let fitScale=1;
-let pan={x:0,y:0};
-let renderRAF=0;
-let dragging=false;
-let dragStart=null;
-let panStart=null;
-let touches=new Map();
-let pinchStart=null;
+if(!MAPS[mapMode])mapMode='screenshot';
+let scale=1,fitScale=1,pan={x:0,y:0};
+let renderRAF=0,dragging=false,dragStart=null,panStart=null,pinchStart=null;
+let touches=new Map(),tileGeneration=0;
 
 function loadState(){
   try{
@@ -76,11 +82,19 @@ function loadState(){
   }catch{return {found:{},notes:{},spoilers:false};}
 }
 function saveState(){localStorage.setItem('hallownest-map-state-v1',JSON.stringify(state));}
-
 function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
-function maxScale(){return Math.max(fitScale,fitScale*MAX_ZOOM_RATIO);}
+function currentMap(){return MAPS[mapMode];}
 function currentQuery(){return (els.searchInput.value||'').trim().toLowerCase();}
-function worldToScreen(m){return {x:m.y*scale-pan.x,y:-m.x*scale-pan.y};}
+function keyPos(x,y){return Number(x).toFixed(2)+','+Number(y).toFixed(2);}
+
+function markerWorld(m){
+  if(mapMode==='sketch'){
+    const p=sketchPos[keyPos(m.x,m.y)];
+    return p?{x:p[0],y:p[1]}:null;
+  }
+  return {x:m.x,y:m.y};
+}
+function worldToScreenPos(p){return {x:p.y*scale-pan.x,y:-p.x*scale-pan.y};}
 function visibleMarker(m){
   if(!activeCats.has(m.category))return false;
   if(els.hideFound.checked&&state.found[m.id])return false;
@@ -88,15 +102,55 @@ function visibleMarker(m){
   return !q||(m.name+' '+(LABELS[m.category]||m.category)).toLowerCase().includes(q);
 }
 
-function setMapMode(mode){
-  mapMode=mode;
-  localStorage.setItem('hallownest-map-base',mode);
-  els.screenshotMap.classList.toggle('active',mode==='screenshot');
-  els.sketchMap.classList.toggle('active',mode==='sketch');
-  els.mapModeScreenshot.classList.toggle('active',mode==='screenshot');
-  els.mapModeSketch.classList.toggle('active',mode==='sketch');
-  if(mode!=='screenshot')els.screenshotHdTiles.replaceChildren();
-  scheduleRender();
+function nativeZoom(){
+  const m=currentMap();
+  if(scale<=1)return 0;
+  return clamp(Math.floor(Math.log2(scale)),0,m.maxNative);
+}
+function renderTiles(){
+  const m=currentMap(),z=nativeZoom();
+  const nativeScale=Math.pow(2,z);
+  const tileWorld=m.crop/nativeScale;
+  const levelW=m.fullWorldW*nativeScale;
+  const levelH=m.fullWorldH*nativeScale;
+  const cols=Math.ceil(levelW/m.crop),rows=Math.ceil(levelH/m.crop);
+  const r=els.mapViewport.getBoundingClientRect();
+  const worldLeft=pan.x/scale,worldTop=pan.y/scale;
+  const worldRight=(pan.x+r.width)/scale,worldBottom=(pan.y+r.height)/scale;
+
+  let minX=Math.max(0,Math.floor(worldLeft/tileWorld)-1);
+  let maxX=Math.min(cols-1,Math.floor(worldRight/tileWorld)+1);
+  let minY=Math.max(0,Math.floor(worldTop/tileWorld)-1);
+  let maxY=Math.min(rows-1,Math.floor(worldBottom/tileWorld)+1);
+
+  const generation=tileGeneration;
+  const needed=new Set();
+  for(let ty=minY;ty<=maxY;ty++){
+    for(let tx=minX;tx<=maxX;tx++){
+      const key=mapMode+'_'+z+'_'+tx+'_'+ty;
+      needed.add(key);
+      let img=els.tileLayer.querySelector('[data-key="'+key+'"]');
+      if(!img){
+        img=new Image();
+        img.className='map-tile';
+        img.dataset.key=key;
+        img.alt='';
+        img.draggable=false;
+        img.decoding='async';
+        img.src=m.url(z,tx,ty);
+        img.onerror=()=>{ if(generation===tileGeneration) img.remove(); };
+        els.tileLayer.appendChild(img);
+      }
+      const xWorld=tx*tileWorld,yWorld=ty*tileWorld;
+      const tilePxW=Math.min(m.crop,levelW-tx*m.crop);
+      const tilePxH=Math.min(m.crop,levelH-ty*m.crop);
+      img.style.left=(xWorld*scale-pan.x)+'px';
+      img.style.top=(yWorld*scale-pan.y)+'px';
+      img.style.width=(tilePxW/nativeScale*scale+0.5)+'px';
+      img.style.height=(tilePxH/nativeScale*scale+0.5)+'px';
+    }
+  }
+  [...els.tileLayer.children].forEach(el=>{if(!needed.has(el.dataset.key))el.remove();});
 }
 
 function buildCategories(){
@@ -119,75 +173,14 @@ function buildCategories(){
   });
 }
 
-function renderBase(){
-  const w=WORLD_W*scale,h=WORLD_H*scale;
-  els.baseLayer.style.transform=`translate(${-pan.x}px,${-pan.y}px)`;
-  els.baseLayer.style.width=w+'px';
-  els.baseLayer.style.height=h+'px';
-  els.screenshotMap.style.width=w+'px';els.screenshotMap.style.height=h+'px';
-  els.sketchMap.style.width=w+'px';els.sketchMap.style.height=h+'px';
-}
-
-function desiredDziLevel(){
-  if(!hd.available)return null;
-  const fullDensity=hd.pixelsPerWorld || (hd.width/WORLD_W);
-  const targetDensity=scale*Math.min(window.devicePixelRatio||1,2);
-  const raw=hd.maxLevel+Math.log2(targetDensity/fullDensity);
-  return clamp(Math.ceil(raw),0,hd.maxLevel);
-}
-
-function renderHdTiles(){
-  if(mapMode!=='screenshot'||!hd.available){
-    els.screenshotHdTiles.replaceChildren();return;
-  }
-  const level=desiredDziLevel();
-  if(level==null)return;
-
-  const factor=Math.pow(2,level-hd.maxLevel);
-  const sourceW=Math.max(1,Math.ceil(hd.width*factor));
-  const sourceH=Math.max(1,Math.ceil(hd.height*factor));
-  const displayW=WORLD_W*scale,displayH=WORLD_H*scale;
-  const fx=displayW/sourceW,fy=displayH/sourceH;
-  const r=els.mapViewport.getBoundingClientRect();
-
-  let minX=Math.floor((pan.x/fx)/hd.tileSize)-2;
-  let minY=Math.floor((pan.y/fy)/hd.tileSize)-2;
-  let maxX=Math.floor(((pan.x+r.width)/fx)/hd.tileSize)+2;
-  let maxY=Math.floor(((pan.y+r.height)/fy)/hd.tileSize)+2;
-  minX=Math.max(0,minX);minY=Math.max(0,minY);
-  maxX=Math.min(Math.ceil(sourceW/hd.tileSize)-1,maxX);
-  maxY=Math.min(Math.ceil(sourceH/hd.tileSize)-1,maxY);
-
-  const needed=new Set();
-  for(let y=minY;y<=maxY;y++){
-    for(let x=minX;x<=maxX;x++){
-      const key=level+'_'+x+'_'+y;needed.add(key);
-      let img=els.screenshotHdTiles.querySelector('[data-key="'+key+'"]');
-      if(!img){
-        img=new Image();img.className='hd-map-tile';img.dataset.key=key;img.alt='';img.draggable=false;
-        img.src=`${hd.folder}/${level}/${x}_${y}.${hd.format}`;
-        img.onerror=()=>img.remove();
-        els.screenshotHdTiles.appendChild(img);
-      }
-      const sw=Math.min(hd.tileSize,sourceW-x*hd.tileSize);
-      const sh=Math.min(hd.tileSize,sourceH-y*hd.tileSize);
-      img.style.left=(x*hd.tileSize*fx-pan.x)+'px';
-      img.style.top=(y*hd.tileSize*fy-pan.y)+'px';
-      img.style.width=(sw*fx+0.4)+'px';
-      img.style.height=(sh*fy+0.4)+'px';
-    }
-  }
-  [...els.screenshotHdTiles.children].forEach(el=>{if(!needed.has(el.dataset.key))el.remove();});
-}
-
 function renderMarkers(){
-  const frag=document.createDocumentFragment();
-  const r=els.mapViewport.getBoundingClientRect();
-  const pad=36;
+  const frag=document.createDocumentFragment(),r=els.mapViewport.getBoundingClientRect(),pad=36;
   let shown=0;
   for(const m of markers){
     if(!visibleMarker(m))continue;
-    const p=worldToScreen(m);
+    const w=markerWorld(m);
+    if(!w)continue;
+    const p=worldToScreenPos(w);
     if(p.x<-pad||p.y<-pad||p.x>r.width+pad||p.y>r.height+pad)continue;
     shown++;
     const b=document.createElement('button');
@@ -202,18 +195,10 @@ function renderMarkers(){
 }
 
 function updateStatus(shown=els.markerLayer.children.length){
-  const ratio=Math.max(.01,scale/fitScale);
-  const zoomLabel=ratio>=10?ratio.toFixed(0):ratio.toFixed(1);
-  let base=mapMode==='screenshot'?(hd.available?'Screenshot HD':'Screenshot'):'Sketch';
-  let detail='';
-  if(mapMode==='screenshot'&&hd.available){
-    const level=desiredDziLevel();
-    const pct=hd.width>=70000?'100%':(hd.width>=30000?'50%':(hd.width>=17000?'25%':(hd.width>=9000?'12.5%':'HD')));
-    detail=` · ${pct} · LOD ${level}/${hd.maxLevel}`;
-  }
-  els.statusChip.textContent=`${base}${detail} · zoom ×${zoomLabel} · ${shown.toLocaleString('it-IT')} marker`;
+  const m=currentMap(),ratio=Math.max(.01,scale/fitScale);
+  const zl=ratio>=10?ratio.toFixed(0):ratio.toFixed(1);
+  els.statusChip.textContent=`${m.label} · tile L${nativeZoom()}/${m.maxNative} · zoom ×${zl} · ${shown.toLocaleString('it-IT')} marker`;
 }
-
 function renderProgress(){
   const found=Object.values(state.found).filter(Boolean).length;
   const pct=markers.length?Math.round(found/markers.length*100):0;
@@ -226,45 +211,51 @@ function renderProgress(){
     return `<div class="progress-row"><span>${g.name}</span><strong>${f} / ${list.length}</strong></div>`;
   }).join('');
 }
-
 function scheduleRender(){
   if(renderRAF)return;
-  renderRAF=requestAnimationFrame(()=>{
-    renderRAF=0;renderBase();renderHdTiles();renderMarkers();renderProgress();
-  });
+  renderRAF=requestAnimationFrame(()=>{renderRAF=0;renderTiles();renderMarkers();renderProgress();});
 }
-
+function fitMap(){
+  const r=els.mapViewport.getBoundingClientRect(),m=currentMap();
+  fitScale=Math.min((r.width*.94)/m.worldW,(r.height*.90)/m.worldH);
+  scale=fitScale;
+  pan.x=Math.max(0,(m.worldW*scale-r.width)/2);
+  pan.y=Math.max(0,(m.worldH*scale-r.height)/2);
+  scheduleRender();
+}
 function setScale(next,anchorX,anchorY){
-  const r=els.mapViewport.getBoundingClientRect();
+  const r=els.mapViewport.getBoundingClientRect(),m=currentMap();
   if(anchorX==null){anchorX=r.width/2;anchorY=r.height/2;}
-  next=clamp(next,Math.max(MIN_ABS_SCALE,fitScale*.45),maxScale());
+  const max=Math.max(fitScale,m.maxScale);
+  next=clamp(next,Math.max(.08,fitScale*.45),max);
   if(Math.abs(next-scale)<1e-5)return;
   const ratio=next/scale;
   pan.x=(pan.x+anchorX)*ratio-anchorX;
   pan.y=(pan.y+anchorY)*ratio-anchorY;
   scale=next;scheduleRender();
 }
-
-function fitMap(){
+function setMapMode(mode){
+  if(!MAPS[mode]||mode===mapMode)return;
   const r=els.mapViewport.getBoundingClientRect();
-  fitScale=Math.min((r.width*.94)/WORLD_W,(r.height*.90)/WORLD_H);
-  fitScale=Math.max(MIN_ABS_SCALE,fitScale);
-  scale=fitScale;
-  pan.x=Math.max(0,(WORLD_W*scale-r.width)/2);
-  pan.y=Math.max(0,(WORLD_H*scale-r.height)/2);
+  const cx=(pan.x+r.width/2)/scale,cy=(pan.y+r.height/2)/scale;
+  mapMode=mode;localStorage.setItem('hallownest-map-base',mode);
+  els.mapModeScreenshot.classList.toggle('active',mode==='screenshot');
+  els.mapModeSketch.classList.toggle('active',mode==='sketch');
+  tileGeneration++;els.tileLayer.replaceChildren();
+  const m=currentMap();
+  fitScale=Math.min((r.width*.94)/m.worldW,(r.height*.90)/m.worldH);
+  scale=clamp(scale,fitScale*.45,Math.max(fitScale,m.maxScale));
+  pan.x=cx*scale-r.width/2;pan.y=cy*scale-r.height/2;
   scheduleRender();
 }
-
 function setAll(on){
   activeCats=on?new Set(Object.keys(LABELS)):new Set();
   els.categoryGroups.querySelectorAll('input[data-cat]').forEach(c=>c.checked=on);scheduleRender();
 }
-
 function openMarker(id){
   selectedId=id;const m=markers[id];if(!m)return;
   els.markerCategory.textContent=LABELS[m.category]||m.category;
-  els.markerTitle.textContent=m.name;
-  els.markerFound.checked=!!state.found[id];
+  els.markerTitle.textContent=m.name;els.markerFound.checked=!!state.found[id];
   els.markerNotes.value=state.notes[id]||'';
   els.markerDetails.textContent=state.spoilers
     ? 'Posizione community verificata sulla mappa. Aggiungi le tue note personali qui sotto.'
@@ -272,9 +263,8 @@ function openMarker(id){
   els.markerCard.classList.remove('hidden');scheduleRender();
 }
 function closeMarker(){selectedId=null;els.markerCard.classList.add('hidden');scheduleRender();}
-
 function exportState(){
-  const blob=new Blob([JSON.stringify({version:3,exportedAt:new Date().toISOString(),state,mapMode},null,2)],{type:'application/json'});
+  const blob=new Blob([JSON.stringify({version:4,exportedAt:new Date().toISOString(),state,mapMode},null,2)],{type:'application/json'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='hallownest-map-progress.json';a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
@@ -282,13 +272,12 @@ async function importState(file){
   try{
     const data=JSON.parse(await file.text()),s=data.state||data;
     state={found:s.found||{},notes:s.notes||{},spoilers:!!s.spoilers};saveState();
-    if(data.mapMode)setMapMode(data.mapMode);scheduleRender();
+    if(data.mapMode&&MAPS[data.mapMode])mapMode=data.mapMode;
+    scheduleRender();
   }catch{alert('File di stato non valido.');}
 }
-
 function localPoint(ev){
-  const r=els.mapViewport.getBoundingClientRect();
-  return {x:ev.clientX-r.left,y:ev.clientY-r.top};
+  const r=els.mapViewport.getBoundingClientRect();return{x:ev.clientX-r.left,y:ev.clientY-r.top};
 }
 
 els.mapViewport.addEventListener('pointerdown',ev=>{
@@ -298,99 +287,67 @@ els.mapViewport.addEventListener('pointerdown',ev=>{
     touches.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
     if(touches.size===2){
       const a=[...touches.values()];
-      pinchStart={dist:Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y),scale,pan:{...pan}};
+      pinchStart={dist:Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y),scale};
       dragging=false;return;
     }
   }
   dragging=true;els.mapViewport.classList.add('dragging');dragStart=localPoint(ev);panStart={...pan};
 });
-
 els.mapViewport.addEventListener('pointermove',ev=>{
   if(ev.pointerType==='touch'&&touches.has(ev.pointerId)){
     touches.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
     if(touches.size===2&&pinchStart){
-      const a=[...touches.values()];
-      const d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);
-      const cx=(a[0].x+a[1].x)/2-els.mapViewport.getBoundingClientRect().left;
-      const cy=(a[0].y+a[1].y)/2-els.mapViewport.getBoundingClientRect().top;
-      setScale(pinchStart.scale*(d/pinchStart.dist),cx,cy);
+      const a=[...touches.values()],d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);
+      const rect=els.mapViewport.getBoundingClientRect();
+      setScale(pinchStart.scale*(d/pinchStart.dist),(a[0].x+a[1].x)/2-rect.left,(a[0].y+a[1].y)/2-rect.top);
       return;
     }
   }
   if(!dragging)return;
-  const p=localPoint(ev);
-  pan.x=panStart.x-(p.x-dragStart.x);pan.y=panStart.y-(p.y-dragStart.y);scheduleRender();
+  const p=localPoint(ev);pan.x=panStart.x-(p.x-dragStart.x);pan.y=panStart.y-(p.y-dragStart.y);scheduleRender();
 });
-
 function endPointer(ev){
-  touches.delete(ev.pointerId);
-  if(touches.size<2)pinchStart=null;
+  touches.delete(ev.pointerId);if(touches.size<2)pinchStart=null;
   if(!touches.size){dragging=false;els.mapViewport.classList.remove('dragging');}
 }
 els.mapViewport.addEventListener('pointerup',endPointer);
 els.mapViewport.addEventListener('pointercancel',endPointer);
-
 els.mapViewport.addEventListener('wheel',ev=>{
-  ev.preventDefault();
-  const p=localPoint(ev);
-  const factor=Math.exp(-ev.deltaY*WHEEL_SPEED);
-  setScale(scale*factor,p.x,p.y);
+  ev.preventDefault();const p=localPoint(ev);setScale(scale*Math.exp(-ev.deltaY*.0042),p.x,p.y);
 },{passive:false});
-
 els.mapViewport.addEventListener('dblclick',ev=>{
-  if(ev.target.closest('.marker'))return;
-  const p=localPoint(ev);setScale(scale*2,p.x,p.y);
+  if(ev.target.closest('.marker'))return;const p=localPoint(ev);setScale(scale*2,p.x,p.y);
 });
 
-els.zoomIn.addEventListener('click',()=>setScale(scale*ZOOM_BUTTON_FACTOR));
-els.zoomOut.addEventListener('click',()=>setScale(scale/ZOOM_BUTTON_FACTOR));
+els.zoomIn.addEventListener('click',()=>setScale(scale*2));
+els.zoomOut.addEventListener('click',()=>setScale(scale/2));
 els.fitBtn.addEventListener('click',fitMap);
 els.searchInput.addEventListener('input',scheduleRender);
 els.hideFound.addEventListener('change',scheduleRender);
-els.allBtn.addEventListener('click',()=>setAll(true));
-els.noneBtn.addEventListener('click',()=>setAll(false));
+els.allBtn.addEventListener('click',()=>setAll(true));els.noneBtn.addEventListener('click',()=>setAll(false));
 els.openSidebar.addEventListener('click',()=>els.sidebar.classList.add('open'));
 els.closeSidebar.addEventListener('click',()=>els.sidebar.classList.remove('open'));
 els.progressBtn.addEventListener('click',()=>els.progressPanel.classList.toggle('open'));
 els.closeProgress.addEventListener('click',()=>els.progressPanel.classList.remove('open'));
 els.closeMarker.addEventListener('click',closeMarker);
-els.markerFound.addEventListener('change',()=>{
-  if(selectedId==null)return;state.found[selectedId]=els.markerFound.checked;saveState();scheduleRender();
-});
-els.markerNotes.addEventListener('input',()=>{
-  if(selectedId==null)return;state.notes[selectedId]=els.markerNotes.value;saveState();
-});
-els.spoilerBtn.addEventListener('click',()=>{
-  state.spoilers=!state.spoilers;saveState();
-  els.spoilerBtn.textContent='Spoiler: '+(state.spoilers?'ON':'OFF');
-  if(selectedId!=null)openMarker(selectedId);
-});
+els.markerFound.addEventListener('change',()=>{if(selectedId==null)return;state.found[selectedId]=els.markerFound.checked;saveState();scheduleRender();});
+els.markerNotes.addEventListener('input',()=>{if(selectedId==null)return;state.notes[selectedId]=els.markerNotes.value;saveState();});
+els.spoilerBtn.addEventListener('click',()=>{state.spoilers=!state.spoilers;saveState();els.spoilerBtn.textContent='Spoiler: '+(state.spoilers?'ON':'OFF');if(selectedId!=null)openMarker(selectedId);});
 els.mapModeScreenshot.addEventListener('click',()=>setMapMode('screenshot'));
 els.mapModeSketch.addEventListener('click',()=>setMapMode('sketch'));
 els.exportBtn.addEventListener('click',exportState);
-els.importInput.addEventListener('change',()=>{
-  const f=els.importInput.files?.[0];if(f)importState(f);els.importInput.value='';
-});
+els.importInput.addEventListener('change',()=>{const f=els.importInput.files?.[0];if(f)importState(f);els.importInput.value='';});
 window.addEventListener('resize',fitMap);
 document.addEventListener('keydown',ev=>{
   if(ev.key==='Escape'){closeMarker();els.progressPanel.classList.remove('open');els.sidebar.classList.remove('open');}
-  if(ev.key==='+'||ev.key==='=')setScale(scale*ZOOM_BUTTON_FACTOR);
-  if(ev.key==='-')setScale(scale/ZOOM_BUTTON_FACTOR);
+  if(ev.key==='+'||ev.key==='=')setScale(scale*2);
+  if(ev.key==='-')setScale(scale/2);
   if(ev.key==='0'||ev.key==='Home')fitMap();
 });
 
-els.sketchMap.addEventListener('error',()=>{
-  els.statusChip.textContent='Errore caricamento base Sketch';els.statusChip.classList.add('error');
-});
-els.sketchMap.addEventListener('load',()=>els.statusChip.classList.remove('error'));
-els.screenshotMap.addEventListener('error',()=>{
-  els.mapModeScreenshot.disabled=true;
-  if(mapMode==='screenshot')setMapMode('sketch');
-});
-els.screenshotMap.addEventListener('load',()=>{els.mapModeScreenshot.disabled=false;});
-
 buildCategories();
 els.spoilerBtn.textContent='Spoiler: '+(state.spoilers?'ON':'OFF');
-setMapMode(mapMode);
+els.mapModeScreenshot.classList.toggle('active',mapMode==='screenshot');
+els.mapModeSketch.classList.toggle('active',mapMode==='sketch');
 requestAnimationFrame(fitMap);
 })();
