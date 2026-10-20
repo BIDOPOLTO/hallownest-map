@@ -29,37 +29,115 @@ fi
 echo "Fallback screenshot downloaded: $(du -h maps/hallownest-screenshot.png | cut -f1)"
 
 echo "Resolving ScriptersWar high-resolution map download..."
-rm -f /tmp/sw-map.html /tmp/hallownest-hd.png
-curl -fLsS --retry 3 --connect-timeout 15 --max-time 120 \
-  -A "Mozilla/5.0" \
-  "https://scripterswar.com/hollowknight/map?image=screenshot" \
-  -o /tmp/sw-map.html || true
+rm -rf /tmp/swscan
+mkdir -p /tmp/swscan
+rm -f /tmp/hallownest-hd.png
 
-HD_LINK=""
-if [ -s /tmp/sw-map.html ]; then
-  HD_LINK="$(perl -0777 -ne 'if (/<a\b[^>]*href=["'"'"']([^"'"'"']+)["'"'"'][^>]*>.*?Download\s+map\s+image\s*\(85\s*MB\).*?<\/a>/is){print $1}' /tmp/sw-map.html 2>/dev/null || true)"
+SW_PAGE="https://scripterswar.com/hollowknight/map?image=screenshot"
+curl -fLsS --retry 3 --connect-timeout 15 --max-time 120 \
+  -A "Mozilla/5.0" "$SW_PAGE" -o /tmp/swscan/page.html || true
+
+# The download link is generated client-side on the current site, so inspect the JS bundles too.
+if [ -s /tmp/swscan/page.html ]; then
+  python3 - <<'PY' > /tmp/swscan/scripts.txt
+import re,html
+from urllib.parse import urljoin
+base='https://scripterswar.com/hollowknight/map?image=screenshot'
+s=html.unescape(open('/tmp/swscan/page.html',encoding='utf-8',errors='ignore').read())
+seen=set()
+for src in re.findall(r'<script\b[^>]*\bsrc=["\']([^"\']+)["\']',s,re.I):
+    u=urljoin(base,src)
+    if u not in seen:
+        seen.add(u); print(u)
+PY
+
+  i=0
+  while IFS= read -r js; do
+    [ -n "$js" ] || continue
+    i=$((i+1))
+    [ "$i" -le 30 ] || break
+    curl -LsS --retry 1 --connect-timeout 10 --max-time 60 \
+      -A "Mozilla/5.0" -e "$SW_PAGE" "$js" -o "/tmp/swscan/js_$i.txt" || true
+  done < /tmp/swscan/scripts.txt
 fi
 
-if [ -n "$HD_LINK" ]; then
-  case "$HD_LINK" in
-    http://*|https://*) ;;
-    /*) HD_LINK="https://scripterswar.com$HD_LINK" ;;
-    *) HD_LINK="https://scripterswar.com/hollowknight/$HD_LINK" ;;
-  esac
-  echo "High-resolution download link found."
+python3 - <<'PY' > /tmp/swscan/candidates.txt
+import re,glob,html
+from urllib.parse import urljoin
+base='https://scripterswar.com/hollowknight/map?image=screenshot'
+texts=[]
+for f in ['/tmp/swscan/page.html']+glob.glob('/tmp/swscan/js_*.txt'):
+    try:texts.append(open(f,encoding='utf-8',errors='ignore').read())
+    except:pass
+s=html.unescape('\n'.join(texts))
+vals=[]
+# Absolute URLs.
+vals += re.findall(r'https?://[^\s"\'<>\\]+',s,re.I)
+# Quoted relative asset/download paths.
+vals += re.findall(r'["\']([^"\']+(?:\.png|\.webp|\.jpg|\.jpeg|mediafire\.com/[^"\']+))["\']',s,re.I)
+seen=set()
+for raw in vals:
+    raw=raw.replace('\\/','/').replace('\\u0026','&').strip()
+    u=urljoin(base,raw)
+    low=u.lower()
+    if not any(k in low for k in ('mediafire','b-cdn','bunny','hollow','map','.png','.webp','.jpg','.jpeg')):
+        continue
+    if u in seen: continue
+    seen.add(u)
+    print(u)
+PY
 
-  if printf '%s' "$HD_LINK" | grep -qi 'mediafire.com'; then
-    HD_DIRECT="$(resolve_mediafire "$HD_LINK")"
-    if [ -n "$HD_DIRECT" ]; then
-      curl -fLsS --retry 2 --connect-timeout 15 --max-time 600 \
-        -A "Mozilla/5.0" -e "$HD_LINK" "$HD_DIRECT" \
-        -o /tmp/hallownest-hd.png || true
-    fi
-  else
-    curl -fLsS --retry 2 --connect-timeout 15 --max-time 600 \
-      -A "Mozilla/5.0" -e "https://scripterswar.com/hollowknight/map?image=screenshot" \
-      "$HD_LINK" -o /tmp/hallownest-hd.png || true
+echo "Scanning ScriptersWar asset candidates..."
+BEST_URL=""
+BEST_SIZE=0
+COUNT=0
+while IFS= read -r cand; do
+  [ -n "$cand" ] || continue
+  COUNT=$((COUNT+1))
+  [ "$COUNT" -le 120 ] || break
+
+  url="$cand"
+  if printf '%s' "$url" | grep -qi 'mediafire.com'; then
+    direct="$(resolve_mediafire "$url")"
+    [ -n "$direct" ] || continue
+    url="$direct"
   fi
+
+  headers="$(curl -LsSI --retry 1 --connect-timeout 8 --max-time 25 \
+    -A "Mozilla/5.0" -e "$SW_PAGE" "$url" 2>/dev/null || true)"
+  ctype="$(printf '%s\n' "$headers" | tr -d '\r' | awk -F': ' 'tolower($1)=="content-type"{v=$2} END{print v}')"
+  clen="$(printf '%s\n' "$headers" | tr -d '\r' | awk -F': ' 'tolower($1)=="content-length"{v=$2} END{print v}')"
+  case "$clen" in ''|*[!0-9]*) clen=0;; esac
+
+  if printf '%s' "$ctype" | grep -qi '^image/' || printf '%s' "$url" | grep -qiE '\.(png|webp|jpg|jpeg)([?&]|$)'; then
+    if [ "$clen" -gt "$BEST_SIZE" ]; then
+      BEST_SIZE="$clen"; BEST_URL="$url"
+    fi
+  fi
+done < /tmp/swscan/candidates.txt
+
+if [ -n "$BEST_URL" ]; then
+  echo "Best ScriptersWar image candidate: $BEST_SIZE bytes"
+  curl -fLsS --retry 2 --connect-timeout 15 --max-time 900 \
+    -A "Mozilla/5.0" -e "$SW_PAGE" "$BEST_URL" -o /tmp/hallownest-hd.png || true
+fi
+
+# If HEAD did not expose a useful Content-Length, try likely map-image candidates directly,
+# but abort each download after a reasonable timeout and validate the result below.
+if [ ! -s /tmp/hallownest-hd.png ]; then
+  while IFS= read -r cand; do
+    case "$(printf '%s' "$cand" | tr '[:upper:]' '[:lower:]')" in
+      *hollow*.png*|*map*.png*|*b-cdn*.png*|*bunny*.png*)
+        echo "Trying likely HD candidate..."
+        curl -fLsS --retry 1 --connect-timeout 10 --max-time 300 \
+          -A "Mozilla/5.0" -e "$SW_PAGE" "$cand" -o /tmp/hallownest-hd.png || true
+        if [ -s /tmp/hallownest-hd.png ] && file /tmp/hallownest-hd.png | grep -qiE 'PNG|image'; then
+          break
+        fi
+        rm -f /tmp/hallownest-hd.png
+        ;;
+    esac
+  done < /tmp/swscan/candidates.txt
 fi
 
 # Validate that the downloaded HD candidate is actually an image.
