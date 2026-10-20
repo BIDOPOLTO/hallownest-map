@@ -1,8 +1,10 @@
 (() => {
 'use strict';
 
-const WORLD_W = 72622 / 64;
-const WORLD_H = 48128 / 64;
+const hd=window.HK_HD_MAP||{available:false};
+const ultra=window.HK_ULTRA_MAP||{available:false};
+const WORLD_W = hd.worldWidth || 1152;
+const WORLD_H = hd.worldHeight || 960;
 const MIN_ABS_SCALE = 0.20;
 const MAX_ZOOM_RATIO = 128;
 const ZOOM_BUTTON_FACTOR = 2;
@@ -10,8 +12,6 @@ const WHEEL_SPEED = 0.0042;
 const TILE_SIZE = 1024;
 
 const markers=(window.HK_MARKERS||[]).map((m,i)=>({...m,id:i}));
-const hd=window.HK_HD_MAP||{available:false};
-
 const GROUPS=[
   {name:'Panchine & Trasporti',cats:['bench','stagStation','tram']},
   {name:'Mappa & Scorciatoie',cats:['map','mapMisc','shortcut']},
@@ -130,7 +130,7 @@ function renderBase(){
 
 function desiredDziLevel(){
   if(!hd.available)return null;
-  const fullDensity=hd.width/WORLD_W;
+  const fullDensity=hd.pixelsPerWorld || (hd.width/WORLD_W);
   const targetDensity=scale*Math.min(window.devicePixelRatio||1,2);
   const raw=hd.maxLevel+Math.log2(targetDensity/fullDensity);
   return clamp(Math.ceil(raw),0,hd.maxLevel);
