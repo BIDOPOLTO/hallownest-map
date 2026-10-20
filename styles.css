@@ -82,3 +82,7 @@ button{color:inherit}
 .mode-btn.active{background:#2b3948;color:#fff}
 .status-chip.error{color:#ffd1d1;border-color:#8d3c43;background:#32171bdd}
 @media(max-width:650px){.map-mode{position:absolute;top:52px;left:0}.mode-btn{padding:6px 8px}}
+
+#screenshotHdTiles{position:absolute;inset:0;z-index:1;pointer-events:none;overflow:hidden}
+.hd-map-tile{position:absolute;display:block;max-width:none;user-select:none;-webkit-user-drag:none;image-rendering:auto}
+.mode-btn:disabled{opacity:.45;cursor:not-allowed}
