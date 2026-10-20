@@ -72,4 +72,14 @@ for token in ('https://scripterswarmap.b-cdn.net/hk_v5/{z}_{x}_{y}.webp?v=1',
 print('ScriptersWar progressive tile sources verified.')
 PY
 
+python3 - "$WORK" <<'PY' || true
+import glob,re
+txt='\n'.join(open(f,encoding='utf-8',errors='ignore').read() for f in glob.glob('/tmp/hk-sw/js_*.txt'))
+for token in ('getTileUrl','validImageSet.has','replace("{z}"','tileSize','getCropSize'):
+    print('=== TILE DIAG',token,'===')
+    m=re.search(re.escape(token),txt,re.I)
+    if m:
+        print(re.sub(r'\s+',' ',txt[max(0,m.start()-1800):m.start()+3200])[:5000])
+PY
+
 echo "Map metadata build completed."
