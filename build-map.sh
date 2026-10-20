@@ -63,6 +63,18 @@ if [ -n "$HD_PAGE" ]; then
   fi
 fi
 
+if [ ! -s /tmp/hallownest-hd.png ] && [ "$HD_KIND" = "50%" ]; then
+  echo "50% source unavailable; falling back to 25%..."
+  HD_PAGE="$(extract_row_link '18,156')"
+  HD_KIND="25%"
+  if [ -n "$HD_PAGE" ]; then
+    HD_URL="$(resolve_mediafire "$HD_PAGE")"
+    if [ -n "$HD_URL" ]; then
+      curl -fLsS --retry 2 --connect-timeout 15 --max-time 600 -A "Mozilla/5.0" -e "$HD_PAGE" "$HD_URL" -o /tmp/hallownest-hd.png || true
+    fi
+  fi
+fi
+
 echo "Installing image tiler..."
 rm -rf /tmp/hksharp
 if npm install --prefix /tmp/hksharp --no-save --silent sharp@0.34.1; then
@@ -85,8 +97,28 @@ NODE
       /tmp/hallownest-hd.png maps/screenshot-hd maps/map-quality.js; then
       echo "HD pyramid ready: $(find maps/screenshot-hd_files -type f 2>/dev/null | wc -l) tiles"
     else
-      echo "WARNING: HD pyramid generation failed."
+      echo "WARNING: HD pyramid generation failed for $HD_KIND source."
+      rm -rf maps/screenshot-hd_files maps/screenshot-hd.dzi
       printf 'window.HK_HD_MAP={"available":false};\n' > maps/map-quality.js
+
+      if [ "$HD_KIND" = "50%" ]; then
+        echo "Retrying pyramid with 25% source..."
+        HD_PAGE="$(extract_row_link '18,156')"
+        HD_URL="$(resolve_mediafire "$HD_PAGE")"
+        rm -f /tmp/hallownest-hd.png
+        if [ -n "$HD_URL" ]; then
+          curl -fLsS --retry 2 --connect-timeout 15 --max-time 600 -A "Mozilla/5.0" -e "$HD_PAGE" "$HD_URL" -o /tmp/hallownest-hd.png || true
+        fi
+        if [ -s /tmp/hallownest-hd.png ]; then
+          if NODE_PATH=/tmp/hksharp/node_modules node tile-screenshot.js \
+            /tmp/hallownest-hd.png maps/screenshot-hd maps/map-quality.js; then
+            echo "25% HD pyramid ready: $(find maps/screenshot-hd_files -type f 2>/dev/null | wc -l) tiles"
+          else
+            rm -rf maps/screenshot-hd_files maps/screenshot-hd.dzi
+            printf 'window.HK_HD_MAP={"available":false};\n' > maps/map-quality.js
+          fi
+        fi
+      fi
     fi
   else
     echo "WARNING: HD source unavailable; using screenshot preview only."
