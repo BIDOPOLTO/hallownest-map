@@ -5,8 +5,24 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
   <meta name="theme-color" content="#10151d">
   <title>Hallownest Map – Federico</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20261020-1433">
   <link rel="manifest" href="manifest.webmanifest">
+
+  <script>
+  (function(){
+    if('serviceWorker' in navigator){
+      navigator.serviceWorker.getRegistrations().then(function(regs){
+        regs.forEach(function(r){ r.unregister(); });
+      }).catch(function(){});
+    }
+    if('caches' in window){
+      caches.keys().then(function(keys){
+        keys.filter(function(k){return k.indexOf('hallownest-map-')===0;})
+            .forEach(function(k){caches.delete(k);});
+      }).catch(function(){});
+    }
+  })();
+  </script>
 </head>
 <body>
   <div id="app">
@@ -91,8 +107,7 @@
     </main>
   </div>
 
-  <script src="markers.js"></script>\n  <script src="maps/map-quality.js"></script>
-  <script src="app.js"></script>
-  <script>if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));}</script>
+  <script src="markers.js?v=20261020-1433"></script>\n  <script src="maps/map-quality.js?v=20261020-1433"></script>
+  <script src="app.js?v=20261020-1433"></script>
 </body>
 </html>
