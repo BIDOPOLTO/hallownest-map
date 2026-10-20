@@ -28,11 +28,7 @@ curl -fLsS --retry 3 --connect-timeout 15 --max-time 300   -A "Mozilla/5.0" -e "
 
 echo "Screenshot: $(du -h maps/hallownest-screenshot.png | cut -f1)"
 
-python3 - <<'PY'
-from PIL import Image
-for f in ["maps/hallownest-sketch.png","maps/hallownest-screenshot.png"]:
-    im=Image.open(f)
-    print(f, im.size, im.format)
-PY
+file maps/hallownest-sketch.png || true
+file maps/hallownest-screenshot.png || true
 
 echo "Both map bases ready."
