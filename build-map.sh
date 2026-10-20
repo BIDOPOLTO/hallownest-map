@@ -82,4 +82,11 @@ for token in ('getTileUrl','validImageSet.has','replace("{z}"','tileSize','getCr
         print(re.sub(r'\s+',' ',txt[max(0,m.start()-1800):m.start()+3200])[:5000])
 PY
 
+echo "Probing progressive map tiles..."
+for u in   "https://scripterswarmap.b-cdn.net/hk_v5/7_0_0.webp?v=1"   "https://scripterswarmap.b-cdn.net/hk_v5/6_0_0.webp?v=1"   "https://scripterswarmap.b-cdn.net/hk_sketch_v3/3_0_0.webp?v=1"   "https://scripterswarmap.b-cdn.net/hk_sketch_v3/2_0_0.webp?v=1"
+do
+  code="$(curl -LsS -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 30 -A "$UA" -e "$PAGE" "$u" || true)"
+  echo "Tile probe $code $u"
+done
+
 echo "Map metadata build completed."
