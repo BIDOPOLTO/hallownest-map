@@ -65,7 +65,7 @@ let dragStart = null;
 let panStart = null;
 let pinchStart = null;
 let renderRAF = 0;
-let mapMode = localStorage.getItem('hallownest-map-base') || 'screenshot';
+let mapMode = localStorage.getItem('hallownest-map-base') || 'sketch';
 
 function loadState(){
   try{
@@ -320,12 +320,19 @@ document.addEventListener('keydown',ev=>{
   if(ev.key==='Escape'){closeMarker();els.progressPanel.classList.remove('open');els.sidebar.classList.remove('open');}
 });
 
-[els.screenshotMap,els.sketchMap].forEach(img=>{
-  img.addEventListener('error',()=>{
-    els.statusChip.textContent='Errore caricamento base '+(img===els.screenshotMap?'Screenshot':'Sketch');
-    els.statusChip.classList.add('error');
-  });
-  img.addEventListener('load',()=>els.statusChip.classList.remove('error'));
+els.sketchMap.addEventListener('error',()=>{
+  els.statusChip.textContent='Errore caricamento base Sketch';
+  els.statusChip.classList.add('error');
+});
+els.sketchMap.addEventListener('load',()=>els.statusChip.classList.remove('error'));
+
+els.screenshotMap.addEventListener('error',()=>{
+  els.mapModeScreenshot.disabled=true;
+  els.mapModeScreenshot.title='Base Screenshot temporaneamente non disponibile';
+  if(mapMode==='screenshot') setMapMode('sketch');
+});
+els.screenshotMap.addEventListener('load',()=>{
+  els.mapModeScreenshot.disabled=false;
 });
 
 buildCategories();
