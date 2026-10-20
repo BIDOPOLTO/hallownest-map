@@ -2,13 +2,21 @@
 'use strict';
 
 const REF_Z = 7;
-const MIN_Z = 3;
+const MIN_Z = 1;
 const MAX_Z = 8;
 
 // Hallownest.net final combined world map: 72,622 x 48,128.
 // At our reference coordinate scale (1/64) this is the world size below.
 const WORLD_W = 72622 / 64;
 const WORLD_H = 48128 / 64;
+
+// 25% Hallownest screenshot source used for the HD tile pyramid.
+// It contains twice the linear detail of the current 12.5% fallback image.
+const HD_SOURCE_W = 18156;
+const HD_SOURCE_H = 12032;
+const HD_REFERENCE_Z = 3;
+const HD_DZI_MAX_LEVEL = 15;
+const HD_TILE = 1024;
 
 const markers = (window.HK_MARKERS || []).map((m,i)=>({...m,id:i}));
 
@@ -46,7 +54,7 @@ const COLORS = {
 };
 
 const els = Object.fromEntries([
- 'mapViewport','baseLayer','screenshotMap','sketchMap','markerLayer',
+ 'mapViewport','baseLayer','screenshotMap','sketchMap','screenshotHdTiles','markerLayer',
  'searchInput','categoryGroups','allBtn','noneBtn','hideFound',
  'fitBtn','zoomIn','zoomOut','openSidebar','sidebar','closeSidebar',
  'progressBtn','progressPanel','closeProgress','progressSummary',
@@ -96,6 +104,7 @@ function setMapMode(mode){
   els.sketchMap.classList.toggle('active',mode==='sketch');
   els.mapModeScreenshot.classList.toggle('active',mode==='screenshot');
   els.mapModeSketch.classList.toggle('active',mode==='sketch');
+  scheduleRender();
   updateStatus();
 }
 
@@ -135,6 +144,67 @@ function renderBase(){
   els.sketchMap.style.height=h+'px';
 }
 
+function clearHdTiles(){
+  els.screenshotHdTiles.replaceChildren();
+}
+
+function renderScreenshotHdTiles(){
+  // Keep the lightweight full image as a fallback/placeholder.
+  if(mapMode!=='screenshot' || z>4){
+    clearHdTiles();
+    return;
+  }
+
+  const rect=els.mapViewport.getBoundingClientRect();
+  const displayW=WORLD_W*scaleForZ();
+  const displayH=WORLD_H*scaleForZ();
+
+  // DZI full-resolution level (15) corresponds to our z=3 source.
+  // At z=4 we use DZI level 14; at z<=3 we keep level 15 and enlarge it.
+  const level = z>=HD_REFERENCE_Z
+    ? Math.max(0,HD_DZI_MAX_LEVEL-(z-HD_REFERENCE_Z))
+    : HD_DZI_MAX_LEVEL;
+
+  const sourceScale=Math.pow(2, level-HD_DZI_MAX_LEVEL);
+  const sourceW=Math.max(1,Math.ceil(HD_SOURCE_W*sourceScale));
+  const sourceH=Math.max(1,Math.ceil(HD_SOURCE_H*sourceScale));
+  const fx=displayW/sourceW;
+  const fy=displayH/sourceH;
+
+  const minX=Math.max(0,Math.floor((pan.x/fx)/HD_TILE)-1);
+  const minY=Math.max(0,Math.floor((pan.y/fy)/HD_TILE)-1);
+  const maxX=Math.min(Math.ceil(sourceW/HD_TILE)-1,Math.floor(((pan.x+rect.width)/fx)/HD_TILE)+1);
+  const maxY=Math.min(Math.ceil(sourceH/HD_TILE)-1,Math.floor(((pan.y+rect.height)/fy)/HD_TILE)+1);
+
+  const needed=new Set();
+  for(let ty=minY;ty<=maxY;ty++){
+    for(let tx=minX;tx<=maxX;tx++){
+      const key=level+'_'+tx+'_'+ty;
+      needed.add(key);
+      let img=els.screenshotHdTiles.querySelector('[data-key="'+key+'"]');
+      if(!img){
+        img=new Image();
+        img.className='hd-map-tile';
+        img.dataset.key=key;
+        img.alt='';
+        img.draggable=false;
+        img.src=`maps/screenshot-hd_files/${level}/${tx}_${ty}.webp`;
+        img.onerror=()=>img.remove();
+        els.screenshotHdTiles.appendChild(img);
+      }
+      const sw=Math.min(HD_TILE,sourceW-tx*HD_TILE);
+      const sh=Math.min(HD_TILE,sourceH-ty*HD_TILE);
+      img.style.left=(tx*HD_TILE*fx-pan.x)+'px';
+      img.style.top=(ty*HD_TILE*fy-pan.y)+'px';
+      img.style.width=(sw*fx)+'px';
+      img.style.height=(sh*fy)+'px';
+    }
+  }
+  [...els.screenshotHdTiles.children].forEach(el=>{
+    if(!needed.has(el.dataset.key))el.remove();
+  });
+}
+
 function renderMarkers(){
   const frag=document.createDocumentFragment();
   let shown=0;
@@ -156,14 +226,14 @@ function renderMarkers(){
 
 function updateStatus(shown){
   if(shown==null)shown=[...els.markerLayer.children].length;
-  const base=mapMode==='screenshot'?'Screenshot':'Sketch';
+  const base=mapMode==='screenshot'?(z<=4?'Screenshot HD':'Screenshot'):'Sketch';
   els.statusChip.textContent=`${base} · ${shown.toLocaleString('it-IT')} marker visibili · ${markers.length.toLocaleString('it-IT')} totali`;
 }
 
 function scheduleRender(){
   if(renderRAF)return;
   renderRAF=requestAnimationFrame(()=>{
-    renderRAF=0;renderBase();renderMarkers();renderProgress();
+    renderRAF=0;renderBase();renderScreenshotHdTiles();renderMarkers();renderProgress();
   });
 }
 
