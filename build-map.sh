@@ -1,18 +1,14 @@
 #!/usr/bin/env bash
 set -u
 mkdir -p maps
+printf 'window.HK_HD_MAP={"available":false};\n' > maps/map-quality.js
 
-echo "Downloading Sketch map from GitHub mirror..."
+echo "Downloading Sketch map..."
 curl -fLsS --retry 3 --connect-timeout 15 --max-time 120 \
   -A "Mozilla/5.0" \
   "https://raw.githubusercontent.com/sadabx/hallownest-tracker/main/public/assets/maps/hallownest-clean.webp" \
   -o maps/hallownest-sketch.webp
-
-if [ ! -s maps/hallownest-sketch.webp ]; then
-  echo "ERROR: Sketch map download failed"
-  exit 1
-fi
-echo "Sketch downloaded: $(du -h maps/hallownest-sketch.webp | cut -f1)"
+[ -s maps/hallownest-sketch.webp ] || { echo "ERROR: Sketch download failed"; exit 1; }
 
 resolve_mediafire () {
   page="$1"
@@ -20,81 +16,89 @@ resolve_mediafire () {
   printf '%s' "$html" | grep -oE 'https://download[^"]+\.png[^"]*' | head -n1 | sed 's/&amp;/\&/g'
 }
 
-echo "Downloading 12.5% Screenshot fallback..."
-rm -f maps/hallownest-screenshot.png
+echo "Downloading 12.5% screenshot fallback..."
 LOW_PAGE="https://www.mediafire.com/file/jmwvqizn8ldfp0f/Combined%252B12.5%2525.png/file"
 LOW_URL="$(resolve_mediafire "$LOW_PAGE")"
+rm -f maps/hallownest-screenshot.png
 if [ -n "$LOW_URL" ]; then
-  curl -fLsS --retry 2 --connect-timeout 15 --max-time 300 \
-    -A "Mozilla/5.0" -e "$LOW_PAGE" "$LOW_URL" \
-    -o maps/hallownest-screenshot.png || true
+  curl -fLsS --retry 2 --connect-timeout 15 --max-time 300 -A "Mozilla/5.0" -e "$LOW_PAGE" "$LOW_URL" -o maps/hallownest-screenshot.png || true
 fi
-if [ -s maps/hallownest-screenshot.png ]; then
-  echo "Screenshot fallback downloaded: $(du -h maps/hallownest-screenshot.png | cut -f1)"
-else
-  rm -f maps/hallownest-screenshot.png
-  echo "WARNING: Screenshot fallback unavailable; Sketch will still work."
-fi
+[ -s maps/hallownest-screenshot.png ] || echo "WARNING: fallback screenshot unavailable."
 
-echo "Looking for the 25% HD Screenshot source..."
-rm -rf maps/screenshot-hd_files maps/screenshot-hd.dzi
-rm -f /tmp/hallownest-downloads.html /tmp/hallownest-hd.png
-curl -fLsS --retry 3 --connect-timeout 15 --max-time 120 \
-  -A "Mozilla/5.0" "https://www.hallownest.net/downloads/" \
-  -o /tmp/hallownest-downloads.html || true
+echo "Resolving high-resolution screenshot source..."
+curl -fLsS --retry 3 --connect-timeout 15 --max-time 120 -A "Mozilla/5.0" \
+  "https://www.hallownest.net/downloads/" -o /tmp/hk-downloads.html || true
 
-HD_PAGE="$(python3 - <<'PY'
-import re, html as h
-try:
-    s=h.unescape(open('/tmp/hallownest-downloads.html',encoding='utf-8',errors='ignore').read())
-except Exception:
-    print('')
-    raise SystemExit
-rows=re.findall(r'<tr\b.*?</tr>',s,re.I|re.S)
-for row in rows:
+extract_row_link () {
+  dims="$1"
+  python3 - "$dims" <<'PY'
+import sys,re,html
+needle=sys.argv[1]
+try:s=html.unescape(open('/tmp/hk-downloads.html',encoding='utf-8',errors='ignore').read())
+except:print('');raise SystemExit
+for row in re.findall(r'<tr\b.*?</tr>',s,re.I|re.S):
     text=re.sub(r'<[^>]+>',' ',row)
-    if '18,156' in text or re.search(r'25\s*%\s*size',text,re.I):
+    if needle in text:
         links=re.findall(r'href=["\']([^"\']+)["\']',row,re.I)
         for link in links:
             if 'mediafire.com' in link.lower():
-                print(link); raise SystemExit
-links=re.findall(r'href=["\']([^"\']*mediafire\.com[^"\']*)["\']',s,re.I)
-# Combined map links are the first entries on the page: 12.5%, 25%, 50%, 100%.
-print(links[1] if len(links)>1 else '')
+                print(link);raise SystemExit
+print('')
 PY
-)"
+}
 
+HD_PAGE="$(extract_row_link '36,311')"
+HD_KIND="50%"
+if [ -z "$HD_PAGE" ]; then
+  HD_PAGE="$(extract_row_link '18,156')"
+  HD_KIND="25%"
+fi
+
+rm -f /tmp/hallownest-hd.png
 if [ -n "$HD_PAGE" ]; then
-  echo "25% source page resolved."
-  HD_HTML="$(curl -LsS --retry 2 --connect-timeout 15 --max-time 90 -A 'Mozilla/5.0' "$HD_PAGE" || true)"
-  HD_URL="$(printf '%s' "$HD_HTML" | grep -oE 'https://download[^"]+\.png[^"]*' | head -n1 | sed 's/&amp;/\&/g' || true)"
+  HD_URL="$(resolve_mediafire "$HD_PAGE")"
   if [ -n "$HD_URL" ]; then
-    echo "Downloading 25% Screenshot HD (~89 MB)..."
-    curl -fLsS --retry 2 --connect-timeout 15 --max-time 600 \
-      -A "Mozilla/5.0" -e "$HD_PAGE" "$HD_URL" \
-      -o /tmp/hallownest-hd.png || true
+    echo "Downloading $HD_KIND HD screenshot source..."
+    curl -fLsS --retry 2 --connect-timeout 15 --max-time 900 -A "Mozilla/5.0" -e "$HD_PAGE" "$HD_URL" -o /tmp/hallownest-hd.png || true
   fi
 fi
 
-if [ -s /tmp/hallownest-hd.png ]; then
-  echo "HD source downloaded: $(du -h /tmp/hallownest-hd.png | cut -f1)"
-  echo "Preparing HD tile pyramid..."
-  rm -rf /tmp/hksharp
-  if npm install --prefix /tmp/hksharp --no-save --silent sharp@0.33.5; then
-    if NODE_PATH=/tmp/hksharp/node_modules node tile-screenshot.js /tmp/hallownest-hd.png maps/screenshot-hd.dzi; then
-      echo "HD tiles ready: $(find maps/screenshot-hd_files -type f 2>/dev/null | wc -l) files"
+echo "Installing image tiler..."
+rm -rf /tmp/hksharp
+if npm install --prefix /tmp/hksharp --no-save --silent sharp@0.34.1; then
+  if [ -s maps/hallownest-screenshot.png ]; then
+    echo "Creating lightweight full-map preview..."
+    NODE_PATH=/tmp/hksharp/node_modules node - <<'NODE'
+const sharp=require('sharp');
+sharp('maps/hallownest-screenshot.png',{limitInputPixels:false})
+  .resize({width:2600,withoutEnlargement:true})
+  .webp({quality:86,effort:3})
+  .toFile('maps/hallownest-screenshot-preview.webp')
+  .catch(e=>{console.error(e);process.exit(1)});
+NODE
+  fi
+
+  if [ -s /tmp/hallownest-hd.png ]; then
+    echo "Creating progressive HD pyramid from $HD_KIND source..."
+    rm -rf maps/screenshot-hd_files maps/screenshot-hd.dzi
+    if NODE_PATH=/tmp/hksharp/node_modules node tile-screenshot.js \
+      /tmp/hallownest-hd.png maps/screenshot-hd maps/map-quality.js; then
+      echo "HD pyramid ready: $(find maps/screenshot-hd_files -type f 2>/dev/null | wc -l) tiles"
     else
-      echo "WARNING: HD tiling failed; 12.5% Screenshot fallback remains available."
-      rm -rf maps/screenshot-hd_files maps/screenshot-hd.dzi
+      echo "WARNING: HD pyramid generation failed."
+      printf 'window.HK_HD_MAP={"available":false};\n' > maps/map-quality.js
     fi
   else
-    echo "WARNING: Sharp install failed; 12.5% Screenshot fallback remains available."
+    echo "WARNING: HD source unavailable; using screenshot preview only."
   fi
 else
-  echo "WARNING: 25% HD source unavailable; 12.5% Screenshot fallback remains available."
+  echo "WARNING: Sharp install failed; using screenshot preview/full fallback only."
 fi
 
-rm -f /tmp/hallownest-hd.png /tmp/hallownest-downloads.html
-rm -rf /tmp/hksharp
+if [ ! -s maps/hallownest-screenshot-preview.webp ] && [ -s maps/hallownest-screenshot.png ]; then
+  cp maps/hallownest-screenshot.png maps/hallownest-screenshot-preview.webp
+fi
 
+rm -f /tmp/hallownest-hd.png /tmp/hk-downloads.html
+rm -rf /tmp/hksharp
 echo "Map build completed."
