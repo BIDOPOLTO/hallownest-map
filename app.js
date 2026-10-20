@@ -4,9 +4,9 @@
 const WORLD_W = 72622 / 64;
 const WORLD_H = 48128 / 64;
 const MIN_ABS_SCALE = 0.20;
-const MAX_SCALE = 128;
-const ZOOM_BUTTON_FACTOR = 1.60;
-const WHEEL_SPEED = 0.0018;
+const MAX_ZOOM_RATIO = 128;
+const ZOOM_BUTTON_FACTOR = 2;
+const WHEEL_SPEED = 0.0042;
 const TILE_SIZE = 1024;
 
 const markers=(window.HK_MARKERS||[]).map((m,i)=>({...m,id:i}));
@@ -78,6 +78,7 @@ function loadState(){
 function saveState(){localStorage.setItem('hallownest-map-state-v1',JSON.stringify(state));}
 
 function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+function maxScale(){return Math.max(fitScale,fitScale*MAX_ZOOM_RATIO);}
 function currentQuery(){return (els.searchInput.value||'').trim().toLowerCase();}
 function worldToScreen(m){return {x:m.y*scale-pan.x,y:-m.x*scale-pan.y};}
 function visibleMarker(m){
@@ -149,10 +150,10 @@ function renderHdTiles(){
   const fx=displayW/sourceW,fy=displayH/sourceH;
   const r=els.mapViewport.getBoundingClientRect();
 
-  let minX=Math.floor((pan.x/fx)/hd.tileSize)-1;
-  let minY=Math.floor((pan.y/fy)/hd.tileSize)-1;
-  let maxX=Math.floor(((pan.x+r.width)/fx)/hd.tileSize)+1;
-  let maxY=Math.floor(((pan.y+r.height)/fy)/hd.tileSize)+1;
+  let minX=Math.floor((pan.x/fx)/hd.tileSize)-2;
+  let minY=Math.floor((pan.y/fy)/hd.tileSize)-2;
+  let maxX=Math.floor(((pan.x+r.width)/fx)/hd.tileSize)+2;
+  let maxY=Math.floor(((pan.y+r.height)/fy)/hd.tileSize)+2;
   minX=Math.max(0,minX);minY=Math.max(0,minY);
   maxX=Math.min(Math.ceil(sourceW/hd.tileSize)-1,maxX);
   maxY=Math.min(Math.ceil(sourceH/hd.tileSize)-1,maxY);
@@ -203,8 +204,14 @@ function renderMarkers(){
 function updateStatus(shown=els.markerLayer.children.length){
   const ratio=Math.max(.01,scale/fitScale);
   const zoomLabel=ratio>=10?ratio.toFixed(0):ratio.toFixed(1);
-  const base=mapMode==='screenshot'?(hd.available?'Screenshot HD':'Screenshot'):'Sketch';
-  els.statusChip.textContent=`${base} · zoom ×${zoomLabel} · ${shown.toLocaleString('it-IT')} marker visibili`;
+  let base=mapMode==='screenshot'?(hd.available?'Screenshot HD':'Screenshot'):'Sketch';
+  let detail='';
+  if(mapMode==='screenshot'&&hd.available){
+    const level=desiredDziLevel();
+    const pct=hd.width>=30000?'50%':(hd.width>=17000?'25%':'HD');
+    detail=` · ${pct} · LOD ${level}/${hd.maxLevel}`;
+  }
+  els.statusChip.textContent=`${base}${detail} · zoom ×${zoomLabel} · ${shown.toLocaleString('it-IT')} marker`;
 }
 
 function renderProgress(){
@@ -230,7 +237,7 @@ function scheduleRender(){
 function setScale(next,anchorX,anchorY){
   const r=els.mapViewport.getBoundingClientRect();
   if(anchorX==null){anchorX=r.width/2;anchorY=r.height/2;}
-  next=clamp(next,Math.max(MIN_ABS_SCALE,fitScale*.45),MAX_SCALE);
+  next=clamp(next,Math.max(MIN_ABS_SCALE,fitScale*.45),maxScale());
   if(Math.abs(next-scale)<1e-5)return;
   const ratio=next/scale;
   pan.x=(pan.x+anchorX)*ratio-anchorX;
@@ -369,6 +376,7 @@ document.addEventListener('keydown',ev=>{
   if(ev.key==='Escape'){closeMarker();els.progressPanel.classList.remove('open');els.sidebar.classList.remove('open');}
   if(ev.key==='+'||ev.key==='=')setScale(scale*ZOOM_BUTTON_FACTOR);
   if(ev.key==='-')setScale(scale/ZOOM_BUTTON_FACTOR);
+  if(ev.key==='0'||ev.key==='Home')fitMap();
 });
 
 els.sketchMap.addEventListener('error',()=>{
