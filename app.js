@@ -5,7 +5,11 @@ const TILE = 1024;
 const TILE_MIN_Z = 3;
 const TILE_MAX_Z = 8;
 const REF_Z = 7;
-const TILE_URL = (z,x,y) => `https://scripterswarmap.b-cdn.net/hk_v4/${z}_${x}_${y}.png?v=1`;
+const TILE_DIRECT = (z,x,y) => `https://scripterswarmap.b-cdn.net/hk_v4/${z}_${x}_${y}.png?v=1`;
+const TILE_PROXY = (z,x,y) => {
+  const source = encodeURIComponent(`https://scripterswarmap.b-cdn.net/hk_v4/${z}_${x}_${y}.png?v=1`);
+  return `https://images.weserv.nl/?url=${source}&output=png`;
+};
 const markers = (window.HK_MARKERS || []).map((m,i)=>({...m,id:i}));
 
 const GROUPS = [
@@ -142,8 +146,19 @@ function renderTiles(){
       img.alt='';
       img.draggable=false;
       img.style.left=(x*TILE)+'px';img.style.top=(y*TILE)+'px';
-      img.src=TILE_URL(z,x,y);
-      img.onerror=()=>{img.style.display='none';};
+      img.dataset.source='direct';
+      img.src=TILE_DIRECT(z,x,y);
+      img.onload=()=>{ img.dataset.loaded='1'; updateTileHealth(); };
+      img.onerror=()=>{
+        if(img.dataset.source==='direct'){
+          img.dataset.source='proxy';
+          img.src=TILE_PROXY(z,x,y);
+        }else{
+          img.dataset.failed='1';
+          img.style.display='none';
+          updateTileHealth();
+        }
+      };
       els.tileLayer.appendChild(img);tileKeys.add(key);
     }
   }
@@ -151,6 +166,19 @@ function renderTiles(){
     if(!needed.has(el.dataset.key)){tileKeys.delete(el.dataset.key);el.remove();}
   }
   els.tileLayer.style.transform=`translate(${-pan.x}px,${-pan.y}px)`;
+}
+
+
+function updateTileHealth(){
+  const all=[...els.tileLayer.querySelectorAll('.map-tile')];
+  const loaded=all.filter(x=>x.dataset.loaded==='1').length;
+  const failed=all.filter(x=>x.dataset.failed==='1').length;
+  if(all.length && loaded===0 && failed===all.length){
+    els.statusChip.textContent='Base mappa non raggiungibile · marker e tracker restano attivi';
+    els.statusChip.classList.add('error');
+  }else{
+    els.statusChip.classList.remove('error');
+  }
 }
 
 function scheduleRender(){
