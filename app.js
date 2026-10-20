@@ -208,7 +208,7 @@ function updateStatus(shown=els.markerLayer.children.length){
   let detail='';
   if(mapMode==='screenshot'&&hd.available){
     const level=desiredDziLevel();
-    const pct=hd.width>=30000?'50%':(hd.width>=17000?'25%':'HD');
+    const pct=hd.width>=30000?'50%':(hd.width>=17000?'25%':(hd.width>=9000?'12.5%':'HD'));
     detail=` · ${pct} · LOD ${level}/${hd.maxLevel}`;
   }
   els.statusChip.textContent=`${base}${detail} · zoom ×${zoomLabel} · ${shown.toLocaleString('it-IT')} marker`;
