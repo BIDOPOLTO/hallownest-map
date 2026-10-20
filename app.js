@@ -5,6 +5,7 @@ const TILE = 1024;
 const TILE_MIN_Z = 3;
 const TILE_MAX_Z = 8;
 const REF_Z = 7;
+const TILE_LOCAL = (z,x,y) => `./tiles/${z}_${x}_${y}.png`;
 const TILE_DIRECT = (z,x,y) => `https://scripterswarmap.b-cdn.net/hk_v4/${z}_${x}_${y}.png?v=1`;
 const TILE_PROXY = (z,x,y) => {
   const source = encodeURIComponent(`https://scripterswarmap.b-cdn.net/hk_v4/${z}_${x}_${y}.png?v=1`);
@@ -146,11 +147,14 @@ function renderTiles(){
       img.alt='';
       img.draggable=false;
       img.style.left=(x*TILE)+'px';img.style.top=(y*TILE)+'px';
-      img.dataset.source='direct';
-      img.src=TILE_DIRECT(z,x,y);
+      img.dataset.source='local';
+      img.src=TILE_LOCAL(z,x,y);
       img.onload=()=>{ img.dataset.loaded='1'; updateTileHealth(); };
       img.onerror=()=>{
-        if(img.dataset.source==='direct'){
+        if(img.dataset.source==='local'){
+          img.dataset.source='direct';
+          img.src=TILE_DIRECT(z,x,y);
+        }else if(img.dataset.source==='direct'){
           img.dataset.source='proxy';
           img.src=TILE_PROXY(z,x,y);
         }else{
