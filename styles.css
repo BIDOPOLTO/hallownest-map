@@ -88,3 +88,5 @@ button{color:inherit}
 .mode-btn:disabled{opacity:.45;cursor:not-allowed}
 
 #markerLayer{contain:layout style paint}
+
+.status-chip{font-variant-numeric:tabular-nums;white-space:nowrap}
