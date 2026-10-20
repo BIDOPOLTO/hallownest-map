@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#10151d">
+  <title>Hallownest Map – Federico</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar" class="panel left-panel">
+      <div class="brand">
+        <div class="brand-mark">H</div>
+        <div>
+          <h1>Hallownest Map</h1>
+          <p>Federico · personale</p>
+        </div>
+        <button id="closeSidebar" class="icon-btn mobile-only" aria-label="Chiudi">×</button>
+      </div>
+
+      <div class="search-wrap">
+        <input id="searchInput" type="search" placeholder="Cerca luogo, oggetto, boss…" autocomplete="off">
+      </div>
+
+      <div class="toolbar-row">
+        <button id="allBtn" class="small-btn">Tutti</button>
+        <button id="noneBtn" class="small-btn">Nessuno</button>
+        <label class="toggle"><input id="hideFound" type="checkbox"><span>Nascondi trovati</span></label>
+      </div>
+
+      <div id="categoryGroups" class="category-groups"></div>
+
+      <div class="sidebar-footer">
+        <button id="exportBtn" class="small-btn">Esporta stato</button>
+        <label class="small-btn file-btn">Importa<input id="importInput" type="file" accept=".json,application/json"></label>
+      </div>
+    </aside>
+
+    <main id="mapShell">
+      <div id="mapViewport" aria-label="Mappa interattiva di Hallownest">
+        <div id="tileLayer"></div>
+        <div id="markerLayer"></div>
+      </div>
+
+      <div class="topbar">
+        <button id="openSidebar" class="icon-btn">☰</button>
+        <div class="title-chip">Hallownest</div>
+        <button id="fitBtn" class="icon-btn" title="Mostra tutta la mappa">⌂</button>
+        <button id="spoilerBtn" class="pill-btn" title="Dettagli spoiler">Spoiler: OFF</button>
+        <button id="progressBtn" class="icon-btn" title="Progressi">◎</button>
+      </div>
+
+      <div class="zoom-controls">
+        <button id="zoomIn" class="icon-btn">+</button>
+        <button id="zoomOut" class="icon-btn">−</button>
+      </div>
+
+      <div id="statusChip" class="status-chip"></div>
+
+      <section id="progressPanel" class="panel right-panel">
+        <div class="panel-head">
+          <div>
+            <h2>Progress Tracker</h2>
+            <p id="progressSummary"></p>
+          </div>
+          <button id="closeProgress" class="icon-btn">×</button>
+        </div>
+        <div id="progressBarWrap"><div id="progressBar"></div></div>
+        <div id="progressGroups"></div>
+        <div class="privacy-note">I progressi vengono salvati solo in questo browser.</div>
+      </section>
+
+      <section id="markerCard" class="marker-card hidden" role="dialog" aria-live="polite">
+        <button id="closeMarker" class="marker-close">×</button>
+        <div class="marker-category" id="markerCategory"></div>
+        <h2 id="markerTitle"></h2>
+        <p id="markerDetails" class="spoiler-copy"></p>
+        <label class="found-row"><input id="markerFound" type="checkbox"><span>Segna come trovato</span></label>
+        <label class="notes-label">Note personali<textarea id="markerNotes" rows="3" placeholder="Scrivi una nota…"></textarea></label>
+      </section>
+    </main>
+  </div>
+
+  <script src="markers.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
