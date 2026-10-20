@@ -41,7 +41,7 @@
     <main id="mapShell">
       <div id="mapViewport" aria-label="Mappa interattiva di Hallownest">
         <div id="baseLayer">
-          <img id="screenshotMap" class="base-map" src="maps/hallownest-screenshot.png" alt="">
+          <img id="screenshotMap" class="base-map" src="maps/hallownest-screenshot-preview.webp" alt="">
           <img id="sketchMap" class="base-map" src="maps/hallownest-sketch.webp" alt="">
         </div>
         <div id="screenshotHdTiles" aria-hidden="true"></div>
@@ -91,7 +91,7 @@
     </main>
   </div>
 
-  <script src="markers.js"></script>
+  <script src="markers.js"></script>\n  <script src="maps/map-quality.js"></script>
   <script src="app.js"></script>
   <script>if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));}</script>
 </body>
