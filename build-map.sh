@@ -28,6 +28,73 @@ fi
 [ -s maps/hallownest-screenshot.png ] || { echo "ERROR: screenshot fallback unavailable"; exit 1; }
 echo "Fallback screenshot downloaded: $(du -h maps/hallownest-screenshot.png | cut -f1)"
 
+echo "Resolving official Hallownest 100% world map (72,622 x 48,128; 835.61 MB)..."
+rm -f /tmp/hallownest-hd.png /tmp/hallownest-downloads.json
+
+fetch_downloads_json () {
+  curl -fLsS --retry 2 --connect-timeout 15 --max-time 90 -A "Mozilla/5.0" \
+    "https://www.hallownest.net/wp-json/wp/v2/pages?slug=downloads&_fields=content" \
+    -o /tmp/hallownest-downloads.json && return 0
+  curl -fLsS --retry 2 --connect-timeout 15 --max-time 90 -A "Mozilla/5.0" \
+    "https://www.hallownest.net/?rest_route=/wp/v2/pages&slug=downloads&_fields=content" \
+    -o /tmp/hallownest-downloads.json && return 0
+  curl -fLsS --retry 2 --connect-timeout 15 --max-time 90 -A "Mozilla/5.0" \
+    "https://hallownest.net/wp-json/wp/v2/pages?slug=downloads&_fields=content" \
+    -o /tmp/hallownest-downloads.json && return 0
+  return 1
+}
+
+FULL_PAGE=""
+if fetch_downloads_json; then
+  FULL_PAGE="$(python3 - <<'PY'
+import json,re,html
+try:
+    data=json.load(open('/tmp/hallownest-downloads.json',encoding='utf-8'))
+    raw=''
+    if isinstance(data,list) and data:
+        raw=((data[0].get('content') or {}).get('rendered') or '')
+    elif isinstance(data,dict):
+        raw=((data.get('content') or {}).get('rendered') or '')
+    s=html.unescape(raw)
+except Exception:
+    print(''); raise SystemExit
+rows=re.findall(r'<tr\b.*?</tr>',s,re.I|re.S)
+for row in rows:
+    txt=re.sub(r'<[^>]+>',' ',row)
+    if ('72,622' in txt and '48,128' in txt) or '835.61' in txt:
+        for link in re.findall(r'href=["\']([^"\']+)["\']',row,re.I):
+            if 'mediafire.com' in link.lower():
+                print(link); raise SystemExit
+print('')
+PY
+)"
+fi
+
+if [ -n "$FULL_PAGE" ]; then
+  echo "Official 100% MediaFire page found."
+  FULL_URL="$(resolve_mediafire "$FULL_PAGE")"
+  if [ -n "$FULL_URL" ]; then
+    echo "Downloading official 100% Hallownest map (~836 MB)..."
+    curl -fLsS --retry 2 --connect-timeout 20 --max-time 1800 \
+      -A "Mozilla/5.0" -e "$FULL_PAGE" "$FULL_URL" -o /tmp/hallownest-hd.png || true
+  fi
+else
+  echo "WARNING: official 100% link could not be resolved from Hallownest.net."
+fi
+
+if [ -s /tmp/hallownest-hd.png ]; then
+  FULL_DIMS="$(file /tmp/hallownest-hd.png | sed -nE 's/.* ([0-9]+) x ([0-9]+).*/\1 \2/p' | head -n1)"
+  FULL_W="$(printf '%s' "$FULL_DIMS" | awk '{print $1}')"
+  FULL_H="$(printf '%s' "$FULL_DIMS" | awk '{print $2}')"
+  echo "Official candidate dimensions: ${FULL_W}x${FULL_H}"
+  FULL_OK="$(awk -v w="$FULL_W" -v h="$FULL_H" 'BEGIN{r=(h>0?w/h:0);t=72622/48128;print (w>=70000&&h>=46000&&(r-t<0.01&&t-r<0.01))?1:0}')"
+  if [ "$FULL_OK" != "1" ]; then
+    echo "WARNING: official 100% candidate failed dimension validation."
+    rm -f /tmp/hallownest-hd.png
+  fi
+fi
+
+if [ ! -s /tmp/hallownest-hd.png ]; then
 echo "Resolving ScriptersWar high-resolution map download..."
 rm -rf /tmp/swscan
 mkdir -p /tmp/swscan
@@ -146,6 +213,8 @@ done < /tmp/swscan/candidates.txt
 if [ -s /tmp/swscan/selected.png ]; then
   mv /tmp/swscan/selected.png /tmp/hallownest-hd.png
 fi
+fi
+
 # Validate that the downloaded HD candidate is actually an image.
 if [ -s /tmp/hallownest-hd.png ]; then
   if ! file /tmp/hallownest-hd.png | grep -qiE 'PNG|image'; then
