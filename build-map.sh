@@ -28,6 +28,11 @@ PY
 i=0
 while IFS= read -r js; do
   [ -n "$js" ] || continue
+  case "$js" in
+    http://*|https://*) ;;
+    *) continue ;;
+  esac
+  if printf '%s' "$js" | grep -q '[{}<>[:space:]]'; then continue; fi
   i=$((i+1))
   [ "$i" -le 40 ] || break
   curl -fLsS --retry 2 --connect-timeout 10 --max-time 90 -A "$UA" -e "$PAGE" "$js" -o "$WORK/js_$i.txt" || true
