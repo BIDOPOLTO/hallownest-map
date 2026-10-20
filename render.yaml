@@ -2,7 +2,7 @@ services:
   - type: web
     name: hallownest-map-federico
     runtime: static
-    buildCommand: echo "No build required"
+    buildCommand: bash build-map.sh
     staticPublishPath: .
     autoDeployTrigger: commit
     headers:
