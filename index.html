@@ -39,13 +39,20 @@
 
     <main id="mapShell">
       <div id="mapViewport" aria-label="Mappa interattiva di Hallownest">
-        <div id="tileLayer"></div>
+        <div id="baseLayer">
+          <img id="screenshotMap" class="base-map" src="maps/hallownest-screenshot.png" alt="">
+          <img id="sketchMap" class="base-map" src="maps/hallownest-sketch.png" alt="">
+        </div>
         <div id="markerLayer"></div>
       </div>
 
       <div class="topbar">
         <button id="openSidebar" class="icon-btn">☰</button>
         <div class="title-chip">Hallownest</div>
+        <div class="map-mode" aria-label="Tipo mappa">
+          <button id="mapModeSketch" class="mode-btn">Sketch</button>
+          <button id="mapModeScreenshot" class="mode-btn">Screenshot</button>
+        </div>
         <button id="fitBtn" class="icon-btn" title="Mostra tutta la mappa">⌂</button>
         <button id="spoilerBtn" class="pill-btn" title="Dettagli spoiler">Spoiler: OFF</button>
         <button id="progressBtn" class="icon-btn" title="Progressi">◎</button>
