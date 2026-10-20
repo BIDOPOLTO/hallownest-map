@@ -1,39 +1,31 @@
 (() => {
 'use strict';
 
-const REF_Z = 7;
-const MIN_Z = 1;
-const MAX_Z = 8;
-
-// Hallownest.net final combined world map: 72,622 x 48,128.
-// At our reference coordinate scale (1/64) this is the world size below.
 const WORLD_W = 72622 / 64;
 const WORLD_H = 48128 / 64;
+const MIN_ABS_SCALE = 0.20;
+const MAX_SCALE = 128;
+const ZOOM_BUTTON_FACTOR = 1.60;
+const WHEEL_SPEED = 0.0018;
+const TILE_SIZE = 1024;
 
-// 25% Hallownest screenshot source used for the HD tile pyramid.
-// It contains twice the linear detail of the current 12.5% fallback image.
-const HD_SOURCE_W = 18156;
-const HD_SOURCE_H = 12032;
-const HD_REFERENCE_Z = 3;
-const HD_DZI_MAX_LEVEL = 15;
-const HD_TILE = 1024;
+const markers=(window.HK_MARKERS||[]).map((m,i)=>({...m,id:i}));
+const hd=window.HK_HD_MAP||{available:false};
 
-const markers = (window.HK_MARKERS || []).map((m,i)=>({...m,id:i}));
-
-const GROUPS = [
-  {name:'Panchine & Trasporti', cats:['bench','stagStation','tram']},
-  {name:'Mappa & Scorciatoie', cats:['map','mapMisc','shortcut']},
-  {name:'Abilità & Amuleti', cats:['abilities','charm','notch']},
-  {name:'Potenziamenti', cats:['maskShard','upgrades','nail']},
-  {name:'Boss & Combattimenti', cats:['boss','battle','godhome']},
-  {name:'Collezionabili', cats:['grub','item']},
-  {name:'NPC & Quest', cats:['npc','quest']},
-  {name:'Geo', cats:['geo']},
-  {name:"Diario del Cacciatore", cats:['huntersJournal']},
-  {name:'Altro', cats:['permFlags']}
+const GROUPS=[
+  {name:'Panchine & Trasporti',cats:['bench','stagStation','tram']},
+  {name:'Mappa & Scorciatoie',cats:['map','mapMisc','shortcut']},
+  {name:'Abilità & Amuleti',cats:['abilities','charm','notch']},
+  {name:'Potenziamenti',cats:['maskShard','upgrades','nail']},
+  {name:'Boss & Combattimenti',cats:['boss','battle','godhome']},
+  {name:'Collezionabili',cats:['grub','item']},
+  {name:'NPC & Quest',cats:['npc','quest']},
+  {name:'Geo',cats:['geo']},
+  {name:"Diario del Cacciatore",cats:['huntersJournal']},
+  {name:'Altro',cats:['permFlags']}
 ];
 
-const LABELS = {
+const LABELS={
   bench:'Panchine',stagStation:'Stazioni Cervo',tram:'Tram',
   map:'Mappe',mapMisc:'Mappa / Info',shortcut:'Scorciatoie',
   abilities:'Abilità',charm:'Amuleti',notch:'Incavi',
@@ -43,7 +35,7 @@ const LABELS = {
   geo:'Geo',huntersJournal:'Diario del Cacciatore',permFlags:'Info / Eventi'
 };
 
-const COLORS = {
+const COLORS={
   bench:'#77e58e',stagStation:'#d9a56b',tram:'#c88f55',
   map:'#65c9ff',mapMisc:'#7ca4c7',shortcut:'#8e9cad',
   abilities:'#8fd7ff',charm:'#bf84ff',notch:'#d9a6ff',
@@ -53,27 +45,29 @@ const COLORS = {
   geo:'#ffd94d',huntersJournal:'#83c889',permFlags:'#a8b2bd'
 };
 
-const els = Object.fromEntries([
+const ids=[
  'mapViewport','baseLayer','screenshotMap','sketchMap','screenshotHdTiles','markerLayer',
- 'searchInput','categoryGroups','allBtn','noneBtn','hideFound',
- 'fitBtn','zoomIn','zoomOut','openSidebar','sidebar','closeSidebar',
- 'progressBtn','progressPanel','closeProgress','progressSummary',
- 'progressBar','progressGroups','markerCard','markerCategory','markerTitle',
- 'markerDetails','markerFound','markerNotes','closeMarker','spoilerBtn',
- 'statusChip','exportBtn','importInput','mapModeScreenshot','mapModeSketch'
-].map(id=>[id,document.getElementById(id)]));
+ 'searchInput','categoryGroups','allBtn','noneBtn','hideFound','fitBtn','zoomIn','zoomOut',
+ 'openSidebar','sidebar','closeSidebar','progressBtn','progressPanel','closeProgress',
+ 'progressSummary','progressBar','progressGroups','markerCard','markerCategory','markerTitle',
+ 'markerDetails','markerFound','markerNotes','closeMarker','spoilerBtn','statusChip',
+ 'exportBtn','importInput','mapModeScreenshot','mapModeSketch'
+];
+const els=Object.fromEntries(ids.map(id=>[id,document.getElementById(id)]));
 
-let state = loadState();
-let activeCats = new Set(Object.keys(LABELS));
-let selectedId = null;
-let z = 6;
-let pan = {x:0,y:0};
-let dragging = false;
-let dragStart = null;
-let panStart = null;
-let pinchStart = null;
-let renderRAF = 0;
-let mapMode = localStorage.getItem('hallownest-map-base') || 'sketch';
+let state=loadState();
+let activeCats=new Set(Object.keys(LABELS));
+let selectedId=null;
+let mapMode=localStorage.getItem('hallownest-map-base')||'screenshot';
+let scale=1;
+let fitScale=1;
+let pan={x:0,y:0};
+let renderRAF=0;
+let dragging=false;
+let dragStart=null;
+let panStart=null;
+let touches=new Map();
+let pinchStart=null;
 
 function loadState(){
   try{
@@ -83,18 +77,14 @@ function loadState(){
 }
 function saveState(){localStorage.setItem('hallownest-map-state-v1',JSON.stringify(state));}
 
-function scaleForZ(zz=z){ return Math.pow(2, REF_Z - zz); }
-function mapPos(m,zz=z){
-  const s=scaleForZ(zz);
-  return {x:s*m.y,y:-s*m.x};
-}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
 function currentQuery(){return (els.searchInput.value||'').trim().toLowerCase();}
+function worldToScreen(m){return {x:m.y*scale-pan.x,y:-m.x*scale-pan.y};}
 function visibleMarker(m){
   if(!activeCats.has(m.category))return false;
-  if(els.hideFound.checked && state.found[m.id])return false;
+  if(els.hideFound.checked&&state.found[m.id])return false;
   const q=currentQuery();
-  if(q && !(m.name+' '+(LABELS[m.category]||m.category)).toLowerCase().includes(q))return false;
-  return true;
+  return !q||(m.name+' '+(LABELS[m.category]||m.category)).toLowerCase().includes(q);
 }
 
 function setMapMode(mode){
@@ -104,8 +94,8 @@ function setMapMode(mode){
   els.sketchMap.classList.toggle('active',mode==='sketch');
   els.mapModeScreenshot.classList.toggle('active',mode==='screenshot');
   els.mapModeSketch.classList.toggle('active',mode==='sketch');
+  if(mode!=='screenshot')els.screenshotHdTiles.replaceChildren();
   scheduleRender();
-  updateStatus();
 }
 
 function buildCategories(){
@@ -129,93 +119,79 @@ function buildCategories(){
 }
 
 function renderBase(){
-  const s=scaleForZ();
-  const w=WORLD_W*s,h=WORLD_H*s;
+  const w=WORLD_W*scale,h=WORLD_H*scale;
   els.baseLayer.style.transform=`translate(${-pan.x}px,${-pan.y}px)`;
   els.baseLayer.style.width=w+'px';
   els.baseLayer.style.height=h+'px';
-
-  // Screenshot layer is the reference geometry.
-  els.screenshotMap.style.width=w+'px';
-  els.screenshotMap.style.height=h+'px';
-
-  // Sketch uses the same world bounds so toggling does not move the viewport.
-  els.sketchMap.style.width=w+'px';
-  els.sketchMap.style.height=h+'px';
+  els.screenshotMap.style.width=w+'px';els.screenshotMap.style.height=h+'px';
+  els.sketchMap.style.width=w+'px';els.sketchMap.style.height=h+'px';
 }
 
-function clearHdTiles(){
-  els.screenshotHdTiles.replaceChildren();
+function desiredDziLevel(){
+  if(!hd.available)return null;
+  const fullDensity=hd.width/WORLD_W;
+  const targetDensity=scale*Math.min(window.devicePixelRatio||1,2);
+  const raw=hd.maxLevel+Math.log2(targetDensity/fullDensity);
+  return clamp(Math.ceil(raw),0,hd.maxLevel);
 }
 
-function renderScreenshotHdTiles(){
-  // Keep the lightweight full image as a fallback/placeholder.
-  if(mapMode!=='screenshot' || z>4){
-    clearHdTiles();
-    return;
+function renderHdTiles(){
+  if(mapMode!=='screenshot'||!hd.available){
+    els.screenshotHdTiles.replaceChildren();return;
   }
+  const level=desiredDziLevel();
+  if(level==null)return;
 
-  const rect=els.mapViewport.getBoundingClientRect();
-  const displayW=WORLD_W*scaleForZ();
-  const displayH=WORLD_H*scaleForZ();
+  const factor=Math.pow(2,level-hd.maxLevel);
+  const sourceW=Math.max(1,Math.ceil(hd.width*factor));
+  const sourceH=Math.max(1,Math.ceil(hd.height*factor));
+  const displayW=WORLD_W*scale,displayH=WORLD_H*scale;
+  const fx=displayW/sourceW,fy=displayH/sourceH;
+  const r=els.mapViewport.getBoundingClientRect();
 
-  // DZI full-resolution level (15) corresponds to our z=3 source.
-  // At z=4 we use DZI level 14; at z<=3 we keep level 15 and enlarge it.
-  const level = z>=HD_REFERENCE_Z
-    ? Math.max(0,HD_DZI_MAX_LEVEL-(z-HD_REFERENCE_Z))
-    : HD_DZI_MAX_LEVEL;
-
-  const sourceScale=Math.pow(2, level-HD_DZI_MAX_LEVEL);
-  const sourceW=Math.max(1,Math.ceil(HD_SOURCE_W*sourceScale));
-  const sourceH=Math.max(1,Math.ceil(HD_SOURCE_H*sourceScale));
-  const fx=displayW/sourceW;
-  const fy=displayH/sourceH;
-
-  const minX=Math.max(0,Math.floor((pan.x/fx)/HD_TILE)-1);
-  const minY=Math.max(0,Math.floor((pan.y/fy)/HD_TILE)-1);
-  const maxX=Math.min(Math.ceil(sourceW/HD_TILE)-1,Math.floor(((pan.x+rect.width)/fx)/HD_TILE)+1);
-  const maxY=Math.min(Math.ceil(sourceH/HD_TILE)-1,Math.floor(((pan.y+rect.height)/fy)/HD_TILE)+1);
+  let minX=Math.floor((pan.x/fx)/hd.tileSize)-1;
+  let minY=Math.floor((pan.y/fy)/hd.tileSize)-1;
+  let maxX=Math.floor(((pan.x+r.width)/fx)/hd.tileSize)+1;
+  let maxY=Math.floor(((pan.y+r.height)/fy)/hd.tileSize)+1;
+  minX=Math.max(0,minX);minY=Math.max(0,minY);
+  maxX=Math.min(Math.ceil(sourceW/hd.tileSize)-1,maxX);
+  maxY=Math.min(Math.ceil(sourceH/hd.tileSize)-1,maxY);
 
   const needed=new Set();
-  for(let ty=minY;ty<=maxY;ty++){
-    for(let tx=minX;tx<=maxX;tx++){
-      const key=level+'_'+tx+'_'+ty;
-      needed.add(key);
+  for(let y=minY;y<=maxY;y++){
+    for(let x=minX;x<=maxX;x++){
+      const key=level+'_'+x+'_'+y;needed.add(key);
       let img=els.screenshotHdTiles.querySelector('[data-key="'+key+'"]');
       if(!img){
-        img=new Image();
-        img.className='hd-map-tile';
-        img.dataset.key=key;
-        img.alt='';
-        img.draggable=false;
-        img.src=`maps/screenshot-hd_files/${level}/${tx}_${ty}.webp`;
+        img=new Image();img.className='hd-map-tile';img.dataset.key=key;img.alt='';img.draggable=false;
+        img.src=`${hd.folder}/${level}/${x}_${y}.${hd.format}`;
         img.onerror=()=>img.remove();
         els.screenshotHdTiles.appendChild(img);
       }
-      const sw=Math.min(HD_TILE,sourceW-tx*HD_TILE);
-      const sh=Math.min(HD_TILE,sourceH-ty*HD_TILE);
-      img.style.left=(tx*HD_TILE*fx-pan.x)+'px';
-      img.style.top=(ty*HD_TILE*fy-pan.y)+'px';
-      img.style.width=(sw*fx)+'px';
-      img.style.height=(sh*fy)+'px';
+      const sw=Math.min(hd.tileSize,sourceW-x*hd.tileSize);
+      const sh=Math.min(hd.tileSize,sourceH-y*hd.tileSize);
+      img.style.left=(x*hd.tileSize*fx-pan.x)+'px';
+      img.style.top=(y*hd.tileSize*fy-pan.y)+'px';
+      img.style.width=(sw*fx+0.4)+'px';
+      img.style.height=(sh*fy+0.4)+'px';
     }
   }
-  [...els.screenshotHdTiles.children].forEach(el=>{
-    if(!needed.has(el.dataset.key))el.remove();
-  });
+  [...els.screenshotHdTiles.children].forEach(el=>{if(!needed.has(el.dataset.key))el.remove();});
 }
 
 function renderMarkers(){
   const frag=document.createDocumentFragment();
+  const r=els.mapViewport.getBoundingClientRect();
+  const pad=36;
   let shown=0;
   for(const m of markers){
     if(!visibleMarker(m))continue;
-    const p=mapPos(m);shown++;
+    const p=worldToScreen(m);
+    if(p.x<-pad||p.y<-pad||p.x>r.width+pad||p.y>r.height+pad)continue;
+    shown++;
     const b=document.createElement('button');
     b.className='marker'+(state.found[m.id]?' found':'')+(selectedId===m.id?' selected':'');
-    b.style.left=(p.x-pan.x)+'px';
-    b.style.top=(p.y-pan.y)+'px';
-    b.style.background=COLORS[m.category]||'#aaa';
+    b.style.left=p.x+'px';b.style.top=p.y+'px';b.style.background=COLORS[m.category]||'#aaa';
     b.dataset.id=m.id;b.title=m.name;b.setAttribute('aria-label',m.name);
     b.addEventListener('click',ev=>{ev.stopPropagation();openMarker(m.id);});
     frag.appendChild(b);
@@ -224,42 +200,57 @@ function renderMarkers(){
   updateStatus(shown);
 }
 
-function updateStatus(shown){
-  if(shown==null)shown=[...els.markerLayer.children].length;
-  const base=mapMode==='screenshot'?(z<=4?'Screenshot HD':'Screenshot'):'Sketch';
-  els.statusChip.textContent=`${base} · ${shown.toLocaleString('it-IT')} marker visibili · ${markers.length.toLocaleString('it-IT')} totali`;
+function updateStatus(shown=els.markerLayer.children.length){
+  const ratio=Math.max(.01,scale/fitScale);
+  const zoomLabel=ratio>=10?ratio.toFixed(0):ratio.toFixed(1);
+  const base=mapMode==='screenshot'?(hd.available?'Screenshot HD':'Screenshot'):'Sketch';
+  els.statusChip.textContent=`${base} · zoom ×${zoomLabel} · ${shown.toLocaleString('it-IT')} marker visibili`;
+}
+
+function renderProgress(){
+  const found=Object.values(state.found).filter(Boolean).length;
+  const pct=markers.length?Math.round(found/markers.length*100):0;
+  els.progressSummary.textContent=`${found} / ${markers.length} trovati · ${pct}%`;
+  els.progressBar.style.width=pct+'%';
+  els.progressGroups.innerHTML=GROUPS.map(g=>{
+    const list=markers.filter(m=>g.cats.includes(m.category));
+    if(!list.length)return '';
+    const f=list.filter(m=>state.found[m.id]).length;
+    return `<div class="progress-row"><span>${g.name}</span><strong>${f} / ${list.length}</strong></div>`;
+  }).join('');
 }
 
 function scheduleRender(){
   if(renderRAF)return;
   renderRAF=requestAnimationFrame(()=>{
-    renderRAF=0;renderBase();renderScreenshotHdTiles();renderMarkers();renderProgress();
+    renderRAF=0;renderBase();renderHdTiles();renderMarkers();renderProgress();
   });
 }
 
-function setZoom(newZ,anchorX,anchorY){
-  newZ=Math.max(MIN_Z,Math.min(MAX_Z,newZ));
-  if(newZ===z)return;
-  const rect=els.mapViewport.getBoundingClientRect();
-  if(anchorX==null){anchorX=rect.width/2;anchorY=rect.height/2;}
-  const oldS=scaleForZ(z),newS=scaleForZ(newZ),ratio=newS/oldS;
+function setScale(next,anchorX,anchorY){
+  const r=els.mapViewport.getBoundingClientRect();
+  if(anchorX==null){anchorX=r.width/2;anchorY=r.height/2;}
+  next=clamp(next,Math.max(MIN_ABS_SCALE,fitScale*.45),MAX_SCALE);
+  if(Math.abs(next-scale)<1e-5)return;
+  const ratio=next/scale;
   pan.x=(pan.x+anchorX)*ratio-anchorX;
   pan.y=(pan.y+anchorY)*ratio-anchorY;
-  z=newZ;scheduleRender();
+  scale=next;scheduleRender();
 }
 
 function fitMap(){
-  const rect=els.mapViewport.getBoundingClientRect();
-  let chosen=MAX_Z;
-  for(let candidate=MIN_Z;candidate<=MAX_Z;candidate++){
-    const s=scaleForZ(candidate);
-    if(WORLD_W*s<=rect.width*.92 && WORLD_H*s<=rect.height*.88){chosen=candidate;break;}
-  }
-  z=chosen;
-  const s=scaleForZ(),w=WORLD_W*s,h=WORLD_H*s;
-  pan.x=Math.max(0,(w-rect.width)/2);
-  pan.y=Math.max(0,(h-rect.height)/2);
+  const r=els.mapViewport.getBoundingClientRect();
+  fitScale=Math.min((r.width*.94)/WORLD_W,(r.height*.90)/WORLD_H);
+  fitScale=Math.max(MIN_ABS_SCALE,fitScale);
+  scale=fitScale;
+  pan.x=Math.max(0,(WORLD_W*scale-r.width)/2);
+  pan.y=Math.max(0,(WORLD_H*scale-r.height)/2);
   scheduleRender();
+}
+
+function setAll(on){
+  activeCats=on?new Set(Object.keys(LABELS)):new Set();
+  els.categoryGroups.querySelectorAll('input[data-cat]').forEach(c=>c.checked=on);scheduleRender();
 }
 
 function openMarker(id){
@@ -275,39 +266,20 @@ function openMarker(id){
 }
 function closeMarker(){selectedId=null;els.markerCard.classList.add('hidden');scheduleRender();}
 
-function renderProgress(){
-  const foundCount=Object.values(state.found).filter(Boolean).length;
-  const pct=markers.length?Math.round(foundCount/markers.length*100):0;
-  els.progressSummary.textContent=`${foundCount} / ${markers.length} trovati · ${pct}%`;
-  els.progressBar.style.width=pct+'%';
-  els.progressGroups.innerHTML=GROUPS.map(g=>{
-    const a=markers.filter(m=>g.cats.includes(m.category));
-    if(!a.length)return '';
-    const f=a.filter(m=>state.found[m.id]).length;
-    return `<div class="progress-row"><span>${g.name}</span><strong>${f} / ${a.length}</strong></div>`;
-  }).join('');
-}
-
-function setAll(on){
-  activeCats=on?new Set(Object.keys(LABELS)):new Set();
-  els.categoryGroups.querySelectorAll('input[data-cat]').forEach(c=>c.checked=on);
-  scheduleRender();
-}
 function exportState(){
-  const blob=new Blob([JSON.stringify({version:2,exportedAt:new Date().toISOString(),state,mapMode},null,2)],{type:'application/json'});
+  const blob=new Blob([JSON.stringify({version:3,exportedAt:new Date().toISOString(),state,mapMode},null,2)],{type:'application/json'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='hallownest-map-progress.json';a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
 async function importState(file){
   try{
     const data=JSON.parse(await file.text()),s=data.state||data;
-    state={found:s.found||{},notes:s.notes||{},spoilers:!!s.spoilers};
-    saveState();
-    if(data.mapMode)setMapMode(data.mapMode);
-    scheduleRender();
+    state={found:s.found||{},notes:s.notes||{},spoilers:!!s.spoilers};saveState();
+    if(data.mapMode)setMapMode(data.mapMode);scheduleRender();
   }catch{alert('File di stato non valido.');}
 }
-function pointFromEvent(ev){
+
+function localPoint(ev){
   const r=els.mapViewport.getBoundingClientRect();
   return {x:ev.clientX-r.left,y:ev.clientY-r.top};
 }
@@ -315,54 +287,61 @@ function pointFromEvent(ev){
 els.mapViewport.addEventListener('pointerdown',ev=>{
   if(ev.target.closest('.marker'))return;
   els.mapViewport.setPointerCapture(ev.pointerId);
-  dragging=true;els.mapViewport.classList.add('dragging');
-  dragStart=pointFromEvent(ev);panStart={...pan};
-});
-els.mapViewport.addEventListener('pointermove',ev=>{
-  if(!dragging)return;const p=pointFromEvent(ev);
-  pan.x=panStart.x-(p.x-dragStart.x);
-  pan.y=panStart.y-(p.y-dragStart.y);
-  scheduleRender();
-});
-function endDrag(){dragging=false;els.mapViewport.classList.remove('dragging');}
-els.mapViewport.addEventListener('pointerup',endDrag);
-els.mapViewport.addEventListener('pointercancel',endDrag);
-els.mapViewport.addEventListener('wheel',ev=>{
-  ev.preventDefault();const p=pointFromEvent(ev);
-  setZoom(z+(ev.deltaY>0?1:-1),p.x,p.y);
-},{passive:false});
-
-let touches=new Map();
-els.mapViewport.addEventListener('pointerdown',ev=>{
   if(ev.pointerType==='touch'){
     touches.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
     if(touches.size===2){
       const a=[...touches.values()];
-      pinchStart={dist:Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y),z};
-      dragging=false;
+      pinchStart={dist:Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y),scale,pan:{...pan}};
+      dragging=false;return;
     }
   }
+  dragging=true;els.mapViewport.classList.add('dragging');dragStart=localPoint(ev);panStart={...pan};
 });
-els.mapViewport.addEventListener('pointermove',ev=>{
-  if(ev.pointerType!=='touch'||!touches.has(ev.pointerId))return;
-  touches.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
-  if(touches.size===2&&pinchStart){
-    const a=[...touches.values()],d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);
-    if(d>pinchStart.dist*1.28){setZoom(pinchStart.z-1);pinchStart={dist:d,z};}
-    else if(d<pinchStart.dist*.78){setZoom(pinchStart.z+1);pinchStart={dist:d,z};}
-  }
-});
-['pointerup','pointercancel'].forEach(type=>els.mapViewport.addEventListener(type,ev=>{
-  touches.delete(ev.pointerId);if(touches.size<2)pinchStart=null;
-}));
 
+els.mapViewport.addEventListener('pointermove',ev=>{
+  if(ev.pointerType==='touch'&&touches.has(ev.pointerId)){
+    touches.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
+    if(touches.size===2&&pinchStart){
+      const a=[...touches.values()];
+      const d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);
+      const cx=(a[0].x+a[1].x)/2-els.mapViewport.getBoundingClientRect().left;
+      const cy=(a[0].y+a[1].y)/2-els.mapViewport.getBoundingClientRect().top;
+      setScale(pinchStart.scale*(d/pinchStart.dist),cx,cy);
+      return;
+    }
+  }
+  if(!dragging)return;
+  const p=localPoint(ev);
+  pan.x=panStart.x-(p.x-dragStart.x);pan.y=panStart.y-(p.y-dragStart.y);scheduleRender();
+});
+
+function endPointer(ev){
+  touches.delete(ev.pointerId);
+  if(touches.size<2)pinchStart=null;
+  if(!touches.size){dragging=false;els.mapViewport.classList.remove('dragging');}
+}
+els.mapViewport.addEventListener('pointerup',endPointer);
+els.mapViewport.addEventListener('pointercancel',endPointer);
+
+els.mapViewport.addEventListener('wheel',ev=>{
+  ev.preventDefault();
+  const p=localPoint(ev);
+  const factor=Math.exp(-ev.deltaY*WHEEL_SPEED);
+  setScale(scale*factor,p.x,p.y);
+},{passive:false});
+
+els.mapViewport.addEventListener('dblclick',ev=>{
+  if(ev.target.closest('.marker'))return;
+  const p=localPoint(ev);setScale(scale*2,p.x,p.y);
+});
+
+els.zoomIn.addEventListener('click',()=>setScale(scale*ZOOM_BUTTON_FACTOR));
+els.zoomOut.addEventListener('click',()=>setScale(scale/ZOOM_BUTTON_FACTOR));
+els.fitBtn.addEventListener('click',fitMap);
 els.searchInput.addEventListener('input',scheduleRender);
 els.hideFound.addEventListener('change',scheduleRender);
 els.allBtn.addEventListener('click',()=>setAll(true));
 els.noneBtn.addEventListener('click',()=>setAll(false));
-els.fitBtn.addEventListener('click',fitMap);
-els.zoomIn.addEventListener('click',()=>setZoom(z-1));
-els.zoomOut.addEventListener('click',()=>setZoom(z+1));
 els.openSidebar.addEventListener('click',()=>els.sidebar.classList.add('open'));
 els.closeSidebar.addEventListener('click',()=>els.sidebar.classList.remove('open'));
 els.progressBtn.addEventListener('click',()=>els.progressPanel.classList.toggle('open'));
@@ -385,25 +364,22 @@ els.exportBtn.addEventListener('click',exportState);
 els.importInput.addEventListener('change',()=>{
   const f=els.importInput.files?.[0];if(f)importState(f);els.importInput.value='';
 });
-window.addEventListener('resize',scheduleRender);
+window.addEventListener('resize',fitMap);
 document.addEventListener('keydown',ev=>{
   if(ev.key==='Escape'){closeMarker();els.progressPanel.classList.remove('open');els.sidebar.classList.remove('open');}
+  if(ev.key==='+'||ev.key==='=')setScale(scale*ZOOM_BUTTON_FACTOR);
+  if(ev.key==='-')setScale(scale/ZOOM_BUTTON_FACTOR);
 });
 
 els.sketchMap.addEventListener('error',()=>{
-  els.statusChip.textContent='Errore caricamento base Sketch';
-  els.statusChip.classList.add('error');
+  els.statusChip.textContent='Errore caricamento base Sketch';els.statusChip.classList.add('error');
 });
 els.sketchMap.addEventListener('load',()=>els.statusChip.classList.remove('error'));
-
 els.screenshotMap.addEventListener('error',()=>{
   els.mapModeScreenshot.disabled=true;
-  els.mapModeScreenshot.title='Base Screenshot temporaneamente non disponibile';
-  if(mapMode==='screenshot') setMapMode('sketch');
+  if(mapMode==='screenshot')setMapMode('sketch');
 });
-els.screenshotMap.addEventListener('load',()=>{
-  els.mapModeScreenshot.disabled=false;
-});
+els.screenshotMap.addEventListener('load',()=>{els.mapModeScreenshot.disabled=false;});
 
 buildCategories();
 els.spoilerBtn.textContent='Spoiler: '+(state.spoilers?'ON':'OFF');
