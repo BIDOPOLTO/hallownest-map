@@ -4,13 +4,13 @@
 const MAPS={
   screenshot:{
     label:'Screenshot',
-    url:(z,x,y)=>`https://scripterswarmap.b-cdn.net/hk_v5/${z}_${x}_${y}.webp?v=1`,
+    url:(z,x,y)=>`maps/hk_v5/${z}_${x}_${y}.webp`,
     dimW:131072,dimH:65536,contentW:72622,contentH:61440,
     crop:1024,maxNative:6,digitalZoom:1
   },
   sketch:{
     label:'Sketch',
-    url:(z,x,y)=>`https://scripterswarmap.b-cdn.net/hk_sketch_v3/${z}_${x}_${y}.webp?v=1`,
+    url:(z,x,y)=>`maps/hk_sketch_v3/${z}_${x}_${y}.webp`,
     dimW:8192,dimH:8192,contentW:5120,contentH:5120,
     crop:1024,maxNative:2,digitalZoom:1
   }
