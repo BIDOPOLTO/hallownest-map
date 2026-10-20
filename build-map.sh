@@ -123,6 +123,19 @@ rm -f /tmp/screenshot-ref.img /tmp/sketch-ref.img
 discover_sw_asset screenshot /tmp/screenshot-ref.img || true
 discover_sw_asset sketch /tmp/sketch-ref.img || true
 
+echo "Sketch JS clues:"
+python3 - <<'PY' || true
+import glob,re
+txt='\n'.join(open(f,encoding='utf-8',errors='ignore').read() for f in glob.glob('/tmp/sw-sketch/js_*.txt'))
+seen=0
+for pat in (r'.{0,180}sketch.{0,260}', r'.{0,180}4498.{0,260}', r'.{0,180}2901.{0,260}', r'.{0,180}(?:tile|bounds).{0,260}'):
+    for m in re.finditer(pat,txt,re.I|re.S):
+        z=re.sub(r'\s+',' ',m.group(0))
+        print(z[:520])
+        seen+=1
+        if seen>=16: raise SystemExit
+PY
+
 if [ ! -s /tmp/screenshot-ref.img ]; then
   echo "WARNING: ScriptersWar screenshot source unavailable; using Hallownest fallback."
   cp maps/hallownest-screenshot-fallback.png /tmp/screenshot-ref.img
@@ -142,17 +155,25 @@ sharp('/tmp/screenshot-ref.img',{limitInputPixels:false})
   .catch(e=>{console.error(e);process.exit(1)});
 NODE
 
-if [ -s /tmp/sketch-ref.img ]; then
-  echo "Preparing ScriptersWar sketch base..."
+USE_SKETCH_REF=0
+if [ -s /tmp/sketch-ref.img ] && [ -s /tmp/screenshot-ref.img ]; then
+  SKETCH_HASH="$(sha256sum /tmp/sketch-ref.img | awk '{print $1}')"
+  SHOT_HASH="$(sha256sum /tmp/screenshot-ref.img | awk '{print $1}')"
+  if [ "$SKETCH_HASH" != "$SHOT_HASH" ]; then USE_SKETCH_REF=1; fi
+fi
+
+if [ "$USE_SKETCH_REF" = "1" ]; then
+  echo "Preparing distinct ScriptersWar sketch base..."
   NODE_PATH=/tmp/hksharp/node_modules node - <<'NODE'
 const sharp=require('sharp');
 sharp('/tmp/sketch-ref.img',{limitInputPixels:false})
+  .resize({width:12000,withoutEnlargement:true})
   .webp({quality:95,effort:3})
   .toFile('maps/hallownest-sketch.webp')
   .catch(e=>{console.error(e);process.exit(1)});
 NODE
 else
-  echo "WARNING: ScriptersWar sketch asset unavailable; using community clean-map fallback."
+  echo "ScriptersWar scan returned the Screenshot asset for Sketch; using clean-map fallback."
   curl -fLsS --retry 3 --connect-timeout 15 --max-time 120 -A "$UA" \
     "https://raw.githubusercontent.com/sadabx/hallownest-tracker/main/public/assets/maps/hallownest-clean.webp" \
     -o maps/hallownest-sketch.webp
@@ -183,9 +204,22 @@ if [ -s /tmp/hallownest-reader.txt ]; then
   FULL_PAGE="$(python3 - <<'PY'
 import re,html
 s=html.unescape(open('/tmp/hallownest-reader.txt',encoding='utf-8',errors='ignore').read())
-for m in re.finditer(r'72,622|835\.61\s*MB',s,re.I):
-    chunk=s[max(0,m.start()-1500):m.start()+3500]
-    for u in re.findall(r'https?://[^\s\)\]>"\']+',chunk,re.I):
+# Restrict parsing to the Combined World Map table/section.
+a=s.lower().find('combined world map')
+b=s.lower().find("king's pass",a+1)
+section=s[a:(b if b>a else a+12000)] if a>=0 else s[:12000]
+for line in section.splitlines():
+    if ('72,622' in line and '48,128' in line) or ('100%' in line and '835.61' in line):
+        links=re.findall(r'https?://[^\s\)\]>"\']+',line,re.I)
+        for u in links:
+            if 'mediafire.com' in u.lower():
+                print(u); raise SystemExit
+# Markdown table may wrap links onto the following line: inspect a small block around exact dimensions.
+m=re.search(r'72,622\s*x\s*48,128|835\.61\s*MB',section,re.I)
+if m:
+    chunk=section[max(0,m.start()-250):m.start()+700]
+    links=re.findall(r'https?://[^\s\)\]>"\']+',chunk,re.I)
+    for u in links:
         if 'mediafire.com' in u.lower():
             print(u); raise SystemExit
 print('')
