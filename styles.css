@@ -107,3 +107,5 @@ button{color:inherit}
 .cat-icon{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;flex:0 0 22px;
   border:1.5px solid var(--marker-color,#8fa0b3);background:#0c1218;color:#f6f8fb}
 .marker-svg.small{width:13px;height:13px;stroke-width:2}
+
+#syncLinkBtn{white-space:nowrap}
