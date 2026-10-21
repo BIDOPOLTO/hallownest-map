@@ -24,6 +24,11 @@ for(const m of Object.values(MAPS)){
 }
 
 const markers=(window.HK_MARKERS||[]).map((m,i)=>({...m,id:i}));
+
+// Baseline imported from Federico's MapGenie 112% checklist report dated 2026-10-21.
+// These 12 IDs are the checklist rows explicitly marked Found (X) in the report.
+const MAPGENIE_BASELINE_20261021=[339,470,473,394,406,397,433,435,437,430,419,420];
+const MAPGENIE_BASELINE_KEY='hallownest-map-mapgenie-baseline-20261021';
 const sketchPos=window.HK_SKETCH_POS||{};
 
 const GROUPS=[
@@ -78,8 +83,22 @@ let touches=new Map(),tileGeneration=0;
 function loadState(){
   try{
     const s=JSON.parse(localStorage.getItem('hallownest-map-state-v1')||'{}');
-    return {found:s.found||{},notes:s.notes||{},spoilers:!!s.spoilers};
-  }catch{return {found:{},notes:{},spoilers:false};}
+    const state={found:s.found||{},notes:s.notes||{},spoilers:!!s.spoilers};
+    if(localStorage.getItem(MAPGENIE_BASELINE_KEY)!=='1'){
+      for(const id of MAPGENIE_BASELINE_20261021) state.found[id]=true;
+      localStorage.setItem(MAPGENIE_BASELINE_KEY,'1');
+      localStorage.setItem('hallownest-map-state-v1',JSON.stringify(state));
+    }
+    return state;
+  }catch{
+    const state={found:{},notes:{},spoilers:false};
+    for(const id of MAPGENIE_BASELINE_20261021) state.found[id]=true;
+    try{
+      localStorage.setItem(MAPGENIE_BASELINE_KEY,'1');
+      localStorage.setItem('hallownest-map-state-v1',JSON.stringify(state));
+    }catch{}
+    return state;
+  }
 }
 function saveState(){localStorage.setItem('hallownest-map-state-v1',JSON.stringify(state));}
 function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
