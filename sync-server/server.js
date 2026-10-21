@@ -59,7 +59,7 @@ const server=http.createServer(async(req,res)=>{
 
   if(req.method==='OPTIONS'){res.statusCode=204;res.end();return;}
   if(req.url==='/health'){send(res,200,{ok:true,redis:redis.isReady});return;}
-  if(req.url!=='/api/state'){send(res,404,{error:'not_found'});return;}
+  if(req.url!=='/api/state'&&req.url!=='/state'){send(res,404,{error:'not_found'});return;}
   if(origin&&origin!==ALLOWED_ORIGIN){send(res,403,{error:'origin_denied'});return;}
 
   const token=bearer(req);
@@ -69,7 +69,7 @@ const server=http.createServer(async(req,res)=>{
   try{
     if(req.method==='GET'){
       const raw=await redis.get(key);
-      if(!raw){send(res,404,{error:'state_not_found'});return;}
+      if(!raw){send(res,200,{state:null,updatedAt:0});return;}
       send(res,200,JSON.parse(raw));
       return;
     }
