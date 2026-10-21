@@ -29,7 +29,7 @@ const markers=(window.HK_MARKERS||[]).map((m,i)=>({...m,id:i}));
 // These 12 IDs are the checklist rows explicitly marked Found (X) in the report.
 const MAPGENIE_BASELINE_20261021=[339,470,473,394,406,397,433,435,437,430,419,420];
 const MAPGENIE_BASELINE_KEY='hallownest-map-mapgenie-baseline-20261021';
-const SYNC_API='https://hallownest-map-sync-api.onrender.com';
+const SYNC_API='https://hallownest-map-sync-v2.onrender.com';
 const SYNC_TOKEN_KEY='hallownest-map-sync-token';
 const STATE_TS_KEY='hallownest-map-state-updated-at';
 const sketchPos=window.HK_SKETCH_POS||{};
@@ -105,7 +105,7 @@ const ids=[
  'hideFound','fitBtn','zoomIn','zoomOut','openSidebar','sidebar','closeSidebar','progressBtn',
  'progressPanel','closeProgress','progressSummary','progressBar','progressGroups','markerCard',
  'markerCategory','markerTitle','markerDetails','markerFound','markerNotes','closeMarker',
- 'spoilerBtn','statusChip','exportBtn','importInput','mapModeScreenshot','mapModeSketch'
+ 'spoilerBtn','statusChip','exportBtn','importInput','syncLinkBtn','mapModeScreenshot','mapModeSketch'
 ];
 const els=Object.fromEntries(ids.map(id=>[id,document.getElementById(id)]));
 
@@ -140,6 +140,28 @@ function loadState(){
       localStorage.setItem('hallownest-map-state-v1',JSON.stringify(state));
     }catch{}
     return state;
+  }
+}
+function generateSyncToken(){
+  const bytes=new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  let raw='';
+  for(const b of bytes)raw+=String.fromCharCode(b);
+  return btoa(raw).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+async function copySyncLink(){
+  if(!syncToken){
+    syncToken=generateSyncToken();
+    localStorage.setItem(SYNC_TOKEN_KEY,syncToken);
+    if(!localStateTimestamp())localStorage.setItem(STATE_TS_KEY,String(Date.now()));
+    await pushCloud(localStateTimestamp()||Date.now());
+  }
+  const url=location.origin+location.pathname+'#sync='+encodeURIComponent(syncToken);
+  try{
+    await navigator.clipboard.writeText(url);
+    alert('Link di sincronizzazione copiato. Aprilo una sola volta sull’altro dispositivo.');
+  }catch{
+    prompt('Copia questo link e aprilo una sola volta sull’altro dispositivo:',url);
   }
 }
 function readSyncToken(){
@@ -549,6 +571,7 @@ els.markerNotes.addEventListener('input',()=>{if(selectedId==null)return;state.n
 els.spoilerBtn.addEventListener('click',()=>{state.spoilers=!state.spoilers;saveState();els.spoilerBtn.textContent='Spoiler: '+(state.spoilers?'ON':'OFF');if(selectedId!=null)openMarker(selectedId);});
 els.mapModeScreenshot.addEventListener('click',()=>setMapMode('screenshot'));
 els.mapModeSketch.addEventListener('click',()=>setMapMode('sketch'));
+els.syncLinkBtn?.addEventListener('click',copySyncLink);
 els.exportBtn.addEventListener('click',exportState);
 els.importInput.addEventListener('change',()=>{const f=els.importInput.files?.[0];if(f)importState(f);els.importInput.value='';});
 window.addEventListener('resize',fitMap);
