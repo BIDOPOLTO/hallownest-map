@@ -62,6 +62,41 @@ const COLORS={
   geo:'#ffd94d',huntersJournal:'#83c889',permFlags:'#a8b2bd'
 };
 
+
+const ICONS={
+  bench:'<path d="M4 10h16v3H4zM6 6h12v4H6zM6 13v6M18 13v6"/>',
+  stagStation:'<path d="M12 20v-7M12 10c-3 0-5-2-5-5M12 10c3 0 5-2 5-5M7 7 4 5M17 7l3-2M9 12c-2 1-3 3-3 5M15 12c2 1 3 3 3 5"/>',
+  tram:'<rect x="4" y="5" width="16" height="12" rx="3"/><path d="M7 9h4M13 9h4M7 17l-2 3M17 17l2 3"/>',
+  map:'<path d="m3 6 6-2 6 2 6-2v14l-6 2-6-2-6 2zM9 4v14M15 6v14"/>',
+  mapMisc:'<circle cx="12" cy="12" r="8"/><path d="M12 11v5M12 8h.01"/>',
+  shortcut:'<path d="M5 12h12M13 8l4 4-4 4"/><path d="M5 7v10"/>',
+  abilities:'<path d="M12 3 9 9l-6 3 6 3 3 6 3-6 6-3-6-3z"/>',
+  charm:'<path d="m12 3 6 5-2 9-4 4-4-4-2-9z"/><circle cx="12" cy="11" r="2"/>',
+  notch:'<path d="M5 5h14v5a4 4 0 0 0 0 8v1H5v-1a4 4 0 0 0 0-8z"/>',
+  maskShard:'<path d="M7 5c3-2 7-2 10 0l2 4-2 8-5 3-5-3-2-8z"/><path d="M9 10h.01M15 10h.01M9 15c2 1 4 1 6 0"/>',
+  upgrades:'<path d="M12 3c-3 4-6 7-6 11a6 6 0 0 0 12 0c0-4-3-7-6-11z"/><path d="M9 14h6M12 11v6"/>',
+  nail:'<path d="m6 18 10-10 2 2L8 20z"/><path d="m14 6 4 4M5 19l-2 2M16 4l4 4"/>',
+  paleOre:'<path d="m12 2 6 5-2 12-4 3-6-3L4 7z"/><path d="m12 2-2 7 2 13M4 7l6 2 8-2M6 19l6-5 4 5"/>',
+  boss:'<path d="M6 8c0-4 12-4 12 0v7l-3 4-3-2-3 2-3-4z"/><path d="M9 11h.01M15 11h.01M10 15h4"/>',
+  battle:'<path d="M5 5l14 14M19 5 5 19"/><path d="m5 5 1 5 4-4M19 5l-1 5-4-4"/>',
+  godhome:'<path d="m5 9 3-5 4 4 4-4 3 5-2 10H7z"/><path d="M8 13h8"/>',
+  grub:'<path d="M7 6c3-3 7-3 10 0 2 2 2 8 0 11-3 4-7 4-10 0-2-3-2-9 0-11z"/><path d="M9 10h.01M15 10h.01M9 14c2 2 4 2 6 0"/>',
+  item:'<circle cx="9" cy="10" r="4"/><path d="M13 10h8M17 10v3M20 10v2"/>',
+  npc:'<circle cx="12" cy="9" r="4"/><path d="M5 21c1-5 13-5 14 0"/>',
+  quest:'<path d="M6 21V4M6 5h11l-2 4 2 4H6"/>',
+  geo:'<path d="m12 3 7 5-3 10-4 3-4-3L5 8z"/><path d="m5 8 7 4 7-4M12 12v9"/>',
+  huntersJournal:'<path d="M5 4h10a4 4 0 0 1 4 4v12H9a4 4 0 0 0-4 0z"/><path d="M9 4v16M12 8h4M12 12h4"/>',
+  permFlags:'<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/>'
+};
+function markerIconKey(m){
+  if(m.category==='nail' && /Pale Ore/i.test(m.name)) return 'paleOre';
+  return ICONS[m.category]?m.category:'permFlags';
+}
+function iconSvg(key,small=false){
+  const body=ICONS[key]||ICONS.permFlags;
+  return \`<svg class="\${small?'marker-svg small':'marker-svg'}" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">\${body}</svg>\`;
+}
+
 const ids=[
  'mapViewport','tileLayer','markerLayer','searchInput','categoryGroups','allBtn','noneBtn',
  'hideFound','fitBtn','zoomIn','zoomOut','openSidebar','sidebar','closeSidebar','progressBtn',
@@ -182,7 +217,7 @@ function buildCategories(){
     g.cats.filter(c=>counts[c]).forEach(cat=>{
       const row=document.createElement('label');row.className='cat-row';
       row.innerHTML=`<input type="checkbox" data-cat="${cat}" checked>
-        <span class="cat-dot" style="background:${COLORS[cat]||'#aaa'}"></span>
+        <span class="cat-icon" style="--marker-color:${COLORS[cat]||'#aaa'}">${iconSvg(cat,true)}</span>
         <span class="cat-name">${LABELS[cat]||cat}</span><span class="cat-count">${counts[cat]}</span>`;
       row.querySelector('input').addEventListener('change',e=>{
         e.target.checked?activeCats.add(cat):activeCats.delete(cat);scheduleRender();
@@ -205,7 +240,9 @@ function renderMarkers(){
     shown++;
     const b=document.createElement('button');
     b.className='marker'+(state.found[m.id]?' found':'')+(selectedId===m.id?' selected':'');
-    b.style.left=p.x+'px';b.style.top=p.y+'px';b.style.background=COLORS[m.category]||'#aaa';
+    b.style.left=p.x+'px';b.style.top=p.y+'px';
+    b.style.setProperty('--marker-color',COLORS[m.category]||'#aaa');
+    b.innerHTML=iconSvg(markerIconKey(m));
     b.dataset.id=m.id;b.title=m.name;b.setAttribute('aria-label',m.name);
     b.addEventListener('click',ev=>{ev.stopPropagation();openMarker(m.id);});
     frag.appendChild(b);
