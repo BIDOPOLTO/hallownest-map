@@ -4,16 +4,12 @@ import { createClient } from 'redis';
 
 const PORT=Number(process.env.PORT||10000);
 const REDIS_URL=process.env.REDIS_URL;
-const TOKEN_HASH=process.env.SYNC_TOKEN_HASH||'';
 const ALLOWED_ORIGIN=process.env.ALLOWED_ORIGIN||'https://hallownest-map-federico.onrender.com';
-const KEY='hallownest:state:v1';
 
 if(!REDIS_URL) throw new Error('REDIS_URL missing');
-if(!TOKEN_HASH) throw new Error('SYNC_TOKEN_HASH missing');
 
 const redis=createClient({url:REDIS_URL});
 redis.on('error',err=>console.error('redis',err.message));
-await redis.connect();
 
 function cors(res,origin){
   if(origin===ALLOWED_ORIGIN){
@@ -29,64 +25,67 @@ function send(res,status,obj){
   res.setHeader('Content-Type','application/json; charset=utf-8');
   res.end(JSON.stringify(obj));
 }
-function authorized(req){
-  const raw=(req.headers.authorization||'').replace(/^Bearer\s+/i,'');
-  if(!raw)return false;
-  const hash=crypto.createHash('sha256').update(raw).digest('hex');
-  try{
-    return crypto.timingSafeEqual(Buffer.from(hash,'hex'),Buffer.from(TOKEN_HASH,'hex'));
-  }catch{return false;}
+function bearer(req){
+  const m=(req.headers.authorization||'').match(/^Bearer\s+([A-Za-z0-9_-]{32,200})$/);
+  return m?m[1]:null;
+}
+function keyFor(token){
+  return 'hallownest:state:'+crypto.createHash('sha256').update(token).digest('hex');
 }
 async function bodyJson(req){
   let raw='';
   for await(const chunk of req){
     raw+=chunk;
-    if(raw.length>500000)throw new Error('body too large');
+    if(raw.length>300000)throw new Error('body too large');
   }
   return raw?JSON.parse(raw):{};
 }
+function cleanState(s){
+  if(!s||typeof s!=='object'||Array.isArray(s))return null;
+  return {
+    found:(s.found&&typeof s.found==='object')?s.found:{},
+    notes:(s.notes&&typeof s.notes==='object')?s.notes:{},
+    spoilers:!!s.spoilers,
+    mapMode:s.mapMode==='sketch'?'sketch':'screenshot'
+  };
+}
+
+await redis.connect();
+console.log('redis connected',REDIS_URL.replace(/:\/\/.*@/,'://***@'));
 
 const server=http.createServer(async(req,res)=>{
   const origin=req.headers.origin||'';
   cors(res,origin);
 
-  if(req.method==='OPTIONS'){
-    res.statusCode=204;res.end();return;
-  }
-  if(req.url==='/health'){
-    send(res,200,{ok:true,redis:redis.isReady});return;
-  }
-  if(req.url!=='/state'){
-    send(res,404,{error:'not found'});return;
-  }
-  if(origin && origin!==ALLOWED_ORIGIN){
-    send(res,403,{error:'origin denied'});return;
-  }
-  if(!authorized(req)){
-    send(res,401,{error:'unauthorized'});return;
-  }
+  if(req.method==='OPTIONS'){res.statusCode=204;res.end();return;}
+  if(req.url==='/health'){send(res,200,{ok:true,redis:redis.isReady});return;}
+  if(req.url!=='/api/state'){send(res,404,{error:'not_found'});return;}
+  if(origin&&origin!==ALLOWED_ORIGIN){send(res,403,{error:'origin_denied'});return;}
+
+  const token=bearer(req);
+  if(!token){send(res,401,{error:'unauthorized'});return;}
+  const key=keyFor(token);
 
   try{
     if(req.method==='GET'){
-      const raw=await redis.get(KEY);
-      send(res,200,raw?JSON.parse(raw):{state:null,updatedAt:0});
+      const raw=await redis.get(key);
+      if(!raw){send(res,404,{error:'state_not_found'});return;}
+      send(res,200,JSON.parse(raw));
       return;
     }
     if(req.method==='PUT'){
       const body=await bodyJson(req);
-      if(!body || typeof body!=='object' || typeof body.state!=='object'){
-        send(res,400,{error:'invalid state'});return;
-      }
-      const updatedAt=Number(body.updatedAt)||Date.now();
-      const payload={state:body.state,updatedAt};
-      await redis.set(KEY,JSON.stringify(payload));
-      send(res,200,{ok:true,updatedAt});
+      const state=cleanState(body.state);
+      if(!state){send(res,400,{error:'invalid_state'});return;}
+      const payload={version:1,updatedAt:Number(body.updatedAt)||Date.now(),state};
+      await redis.set(key,JSON.stringify(payload));
+      send(res,200,{ok:true,updatedAt:payload.updatedAt});
       return;
     }
-    send(res,405,{error:'method not allowed'});
+    send(res,405,{error:'method_not_allowed'});
   }catch(err){
-    console.error(err);
-    send(res,500,{error:'server error'});
+    console.error('request',err);
+    send(res,500,{error:'server_error'});
   }
 });
 
