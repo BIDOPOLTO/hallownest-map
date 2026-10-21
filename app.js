@@ -29,6 +29,9 @@ const markers=(window.HK_MARKERS||[]).map((m,i)=>({...m,id:i}));
 // These 12 IDs are the checklist rows explicitly marked Found (X) in the report.
 const MAPGENIE_BASELINE_20261021=[339,470,473,394,406,397,433,435,437,430,419,420];
 const MAPGENIE_BASELINE_KEY='hallownest-map-mapgenie-baseline-20261021';
+const SYNC_API='https://hallownest-map-sync-api.onrender.com';
+const SYNC_TOKEN_KEY='hallownest-map-sync-token';
+const STATE_TS_KEY='hallownest-map-state-updated-at';
 const sketchPos=window.HK_SKETCH_POS||{};
 
 const GROUPS=[
@@ -106,6 +109,10 @@ const ids=[
 ];
 const els=Object.fromEntries(ids.map(id=>[id,document.getElementById(id)]));
 
+let syncToken=readSyncToken();
+let syncStatus=syncToken?'syncing':'off';
+let syncTimer=null;
+let suppressCloud=false;
 let state=loadState();
 let activeCats=new Set(Object.keys(LABELS));
 let selectedId=null;
@@ -135,7 +142,156 @@ function loadState(){
     return state;
   }
 }
-function saveState(){localStorage.setItem('hallownest-map-state-v1',JSON.stringify(state));}
+function readSyncToken(){
+  try{
+    const prefix='#sync=';
+    if(location.hash.startsWith(prefix)){
+      const token=decodeURIComponent(location.hash.slice(prefix.length)).trim();
+      if(token){
+        localStorage.setItem(SYNC_TOKEN_KEY,token);
+        history.replaceState(null,'',location.pathname+location.search);
+        return token;
+      }
+    }
+    return localStorage.getItem(SYNC_TOKEN_KEY)||'';
+  }catch{return '';}
+}
+function localStateTimestamp(){
+  return Number(localStorage.getItem(STATE_TS_KEY)||0);
+}
+function writeLocalState(ts=Date.now()){
+  localStorage.setItem('hallownest-map-state-v1',JSON.stringify(state));
+  localStorage.setItem(STATE_TS_KEY,String(ts));
+}
+function saveState(){
+  const ts=Date.now();
+  writeLocalState(ts);
+  if(!suppressCloud)scheduleCloudSave(ts);
+}
+function cloudSnapshot(){
+  return {
+    game:{
+      found:{...state.found},
+      notes:{...state.notes},
+      spoilers:!!state.spoilers
+    },
+    mapMode
+  };
+}
+function normalizeCloudSnapshot(raw){
+  const snap=raw&&typeof raw==='object'?raw:{};
+  const game=snap.game&&typeof snap.game==='object'?snap.game:snap;
+  return {
+    game:{
+      found:game.found&&typeof game.found==='object'?game.found:{},
+      notes:game.notes&&typeof game.notes==='object'?game.notes:{},
+      spoilers:!!game.spoilers
+    },
+    mapMode:MAPS[snap.mapMode]?snap.mapMode:null
+  };
+}
+function mergeFirstSync(remote,local){
+  const r=normalizeCloudSnapshot(remote),l=normalizeCloudSnapshot(local);
+  const found={...r.game.found};
+  for(const [id,val] of Object.entries(l.game.found)){
+    if(val)found[id]=true;
+    else if(!(id in found))found[id]=false;
+  }
+  return {
+    game:{
+      found,
+      notes:{...l.game.notes,...r.game.notes},
+      spoilers:r.game.spoilers||l.game.spoilers
+    },
+    mapMode:r.mapMode||l.mapMode||mapMode
+  };
+}
+async function cloudFetch(method='GET',payload=null){
+  const headers={'Authorization':'Bearer '+syncToken};
+  if(payload)headers['Content-Type']='application/json';
+  const res=await fetch(SYNC_API+'/state',{
+    method,
+    headers,
+    body:payload?JSON.stringify(payload):undefined,
+    cache:'no-store'
+  });
+  if(!res.ok)throw new Error('sync '+res.status);
+  return res.json();
+}
+function applyCloudSnapshot(raw,ts){
+  const snap=normalizeCloudSnapshot(raw);
+  suppressCloud=true;
+  try{
+    state={
+      found:{...snap.game.found},
+      notes:{...snap.game.notes},
+      spoilers:!!snap.game.spoilers
+    };
+    localStorage.setItem('hallownest-map-state-v1',JSON.stringify(state));
+    localStorage.setItem(STATE_TS_KEY,String(ts||Date.now()));
+    if(snap.mapMode&&MAPS[snap.mapMode]&&snap.mapMode!==mapMode){
+      mapMode=snap.mapMode;
+      localStorage.setItem('hallownest-map-base',mapMode);
+      els.mapModeScreenshot?.classList.toggle('active',mapMode==='screenshot');
+      els.mapModeSketch?.classList.toggle('active',mapMode==='sketch');
+      tileGeneration++;
+      els.tileLayer?.replaceChildren();
+    }
+  }finally{suppressCloud=false;}
+  if(selectedId!=null)openMarker(selectedId);
+  scheduleRender();
+}
+async function pushCloud(ts=Date.now()){
+  if(!syncToken)return;
+  syncStatus='syncing';scheduleRender();
+  try{
+    const result=await cloudFetch('PUT',{state:cloudSnapshot(),updatedAt:ts});
+    localStorage.setItem(STATE_TS_KEY,String(result.updatedAt||ts));
+    syncStatus='synced';
+  }catch{
+    syncStatus='error';
+  }
+  scheduleRender();
+}
+function scheduleCloudSave(ts){
+  if(!syncToken)return;
+  syncStatus='syncing';
+  clearTimeout(syncTimer);
+  syncTimer=setTimeout(()=>pushCloud(ts),550);
+}
+async function pullCloud(initial=false){
+  if(!syncToken)return;
+  syncStatus='syncing';scheduleRender();
+  try{
+    const remote=await cloudFetch('GET');
+    const localTs=localStateTimestamp();
+    const remoteTs=Number(remote.updatedAt||0);
+    if(!remote.state){
+      await pushCloud(localTs||Date.now());
+      return;
+    }
+    if(initial&&localTs===0){
+      const merged=mergeFirstSync(remote.state,cloudSnapshot());
+      applyCloudSnapshot(merged,Date.now());
+      await pushCloud(Date.now());
+      return;
+    }
+    if(remoteTs>localTs){
+      applyCloudSnapshot(remote.state,remoteTs);
+    }else if(localTs>remoteTs){
+      await pushCloud(localTs);
+      return;
+    }
+    syncStatus='synced';
+  }catch{
+    syncStatus='error';
+  }
+  scheduleRender();
+}
+async function initCloudSync(){
+  if(!syncToken){syncStatus='off';scheduleRender();return;}
+  await pullCloud(true);
+}
 function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
 function currentMap(){return MAPS[mapMode];}
 function currentQuery(){return (els.searchInput.value||'').trim().toLowerCase();}
@@ -255,7 +411,8 @@ function updateStatus(shown=els.markerLayer.children.length){
   const m=currentMap(),ratio=Math.max(.01,scale/fitScale);
   const zl=ratio>=10?ratio.toFixed(0):ratio.toFixed(1);
   const dz=nativeZoom(),sourceZ=(m.maxNative+1)-dz;
-  els.statusChip.textContent=`${m.label} · tile Z${sourceZ} · zoom ×${zl} · ${shown.toLocaleString('it-IT')} marker`;
+  const cloud=syncStatus==='synced'?'☁ sync':syncStatus==='syncing'?'☁ …':syncStatus==='error'?'☁ errore':'☁ off';
+  els.statusChip.textContent=`${m.label} · tile Z${sourceZ} · zoom ×${zl} · ${shown.toLocaleString('it-IT')} marker · ${cloud}`;
 }
 function renderProgress(){
   const found=Object.values(state.found).filter(Boolean).length;
@@ -297,6 +454,7 @@ function setMapMode(mode){
   const r=els.mapViewport.getBoundingClientRect();
   const cx=(pan.x+r.width/2)/scale,cy=(pan.y+r.height/2)/scale;
   mapMode=mode;localStorage.setItem('hallownest-map-base',mode);
+  if(!suppressCloud)saveState();
   els.mapModeScreenshot.classList.toggle('active',mode==='screenshot');
   els.mapModeSketch.classList.toggle('active',mode==='sketch');
   tileGeneration++;els.tileLayer.replaceChildren();
@@ -396,6 +554,9 @@ els.mapModeSketch.addEventListener('click',()=>setMapMode('sketch'));
 els.exportBtn.addEventListener('click',exportState);
 els.importInput.addEventListener('change',()=>{const f=els.importInput.files?.[0];if(f)importState(f);els.importInput.value='';});
 window.addEventListener('resize',fitMap);
+window.addEventListener('focus',()=>{if(syncToken)pullCloud(false);});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&syncToken)pullCloud(false);});
+setInterval(()=>{if(document.visibilityState==='visible'&&syncToken)pullCloud(false);},45000);
 document.addEventListener('keydown',ev=>{
   if(ev.key==='Escape'){closeMarker();els.progressPanel.classList.remove('open');els.sidebar.classList.remove('open');}
   if(ev.key==='+'||ev.key==='=')setScale(scale*2);
@@ -408,4 +569,5 @@ els.spoilerBtn.textContent='Spoiler: '+(state.spoilers?'ON':'OFF');
 els.mapModeScreenshot.classList.toggle('active',mapMode==='screenshot');
 els.mapModeSketch.classList.toggle('active',mapMode==='sketch');
 requestAnimationFrame(fitMap);
+initCloudSync();
 })();
