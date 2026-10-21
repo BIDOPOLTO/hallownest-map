@@ -170,11 +170,9 @@ function saveState(){
 }
 function cloudSnapshot(){
   return {
-    game:{
-      found:{...state.found},
-      notes:{...state.notes},
-      spoilers:!!state.spoilers
-    },
+    found:{...state.found},
+    notes:{...state.notes},
+    spoilers:!!state.spoilers,
     mapMode
   };
 }
