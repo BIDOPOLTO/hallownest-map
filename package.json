@@ -1,0 +1,7 @@
+{
+  "name":"hallownest-map-sync-api",
+  "version":"1.0.0",
+  "private":true,
+  "type":"commonjs",
+  "dependencies":{"redis":"^5.8.2"}
+}
